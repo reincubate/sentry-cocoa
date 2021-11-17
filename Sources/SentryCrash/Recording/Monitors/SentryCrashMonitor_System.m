@@ -555,7 +555,7 @@ initialize()
         g_systemData.processID = [NSProcessInfo processInfo].processIdentifier;
         g_systemData.parentProcessID = getppid();
         g_systemData.deviceAppHash = getDeviceAndAppHash();
-        g_systemData.buildType = getBuildType();
+        // g_systemData.buildType = getBuildType();
         g_systemData.storageSize = getStorageSize();
         g_systemData.memorySize = sentrycrashsysctl_uint64ForName("hw.memsize");
     }
