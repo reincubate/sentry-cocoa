@@ -185,6 +185,15 @@
     XCTAssertTrue(value.tv_sec == 0, @"");
 }
 
+- (void)testSysCtlCurrentProcessStartTime
+{
+    struct timeval actual = sentrycrashsysctl_currentProcessStartTime();
+    NSDate *startTime = [NSDate dateWithTimeIntervalSince1970:actual.tv_sec + actual.tv_usec / 1E6];
+
+    // Current time is after start time
+    XCTAssertGreaterThan([[NSDate date] timeIntervalSinceDate:startTime], 0);
+}
+
 - (void)testGetProcessInfo
 {
     int pid = getpid();
@@ -196,15 +205,6 @@
     NSString *expected = @"xctest";
     XCTAssertEqualObjects(processName, expected, @"");
 }
-
-// This sysctl always returns true for some reason...
-//- (void) testGetProcessInfoInvalid
-//{
-//    int pid = 1000000;
-//    struct kinfo_proc procInfo = {{{{0}}}};
-//    bool success = sentrycrashsysctl_getProcessInfo(pid, &procInfo);
-//    XCTAssertFalse(success, @"");
-//}
 
 - (void)testGetMacAddress
 {

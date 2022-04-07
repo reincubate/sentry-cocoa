@@ -76,6 +76,10 @@ onBooleanElement(const char *const name, const bool value, void *const userData)
 {
     SentryCrash_AppState *state = userData;
 
+    if (name == NULL) {
+        return SentryCrashJSON_ERROR_INVALID_DATA;
+    }
+
     if (strcmp(name, kKeyCrashedLastLaunch) == 0) {
         state->crashedLastLaunch = value;
     }
@@ -87,6 +91,10 @@ static int
 onFloatingPointElement(const char *const name, const double value, void *const userData)
 {
     SentryCrash_AppState *state = userData;
+
+    if (name == NULL) {
+        return SentryCrashJSON_ERROR_INVALID_DATA;
+    }
 
     if (strcmp(name, kKeyActiveDurationSinceLastCrash) == 0) {
         state->activeDurationSinceLastCrash = value;
@@ -102,6 +110,10 @@ static int
 onIntegerElement(const char *const name, const int64_t value, void *const userData)
 {
     SentryCrash_AppState *state = userData;
+
+    if (name == NULL) {
+        return SentryCrashJSON_ERROR_INVALID_DATA;
+    }
 
     if (strcmp(name, kKeyFormatVersion) == 0) {
         if (value != kFormatVersion) {
@@ -189,7 +201,7 @@ timeSince(double timeInSeconds)
  *
  * @return true if the operation was successful.
  */
-bool
+static bool
 loadState(const char *const path)
 {
     // Stop if the file doesn't exist.
@@ -238,7 +250,7 @@ loadState(const char *const path)
  *
  * @return true if the operation was successful.
  */
-bool
+static bool
 saveState(const char *const path)
 {
     int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);

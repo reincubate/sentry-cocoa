@@ -1,10 +1,13 @@
 #import "NSDate+SentryExtras.h"
 #import "SentryBreadcrumbTracker.h"
+#import "SentryMessage.h"
 #import "SentryMeta.h"
+#import "SentrySDK+Private.h"
 #import <Sentry/Sentry.h>
 #import <XCTest/XCTest.h>
 
-@interface SentryBreadcrumbTracker (Private)
+@interface
+SentryBreadcrumbTracker (Private)
 
 + (NSString *)sanitizeViewControllerName:(NSString *)controller;
 
@@ -16,17 +19,27 @@
 
 @implementation SentryTests
 
+- (void)setUp
+{
+    [SentrySDK.currentHub bindClient:nil];
+}
+
 - (void)testVersion
 {
     NSDictionary *info = [[NSBundle bundleForClass:[SentryClient class]] infoDictionary];
     NSString *version = [NSString stringWithFormat:@"%@", info[@"CFBundleShortVersionString"]];
-    XCTAssert([version isEqualToString:SentryMeta.versionString]);
+    if ([info[@"CFBundleIdentifier"] isEqualToString:@"io.sentry.Sentry"]) {
+        // This test is running on a bundle that is not the SDK
+        // (code was loaded inside an app for example)
+        // in this case, we don't care about asserting our hard coded value matches
+        // since this will be the app version instead of our SDK version.
+        XCTAssert([version isEqualToString:SentryMeta.versionString]);
+    }
 }
 
 - (void)testSharedClient
 {
     NSError *error = nil;
-    // SentryClient.logLevel = kSentryLogLevelNone;
     SentryOptions *options = [[SentryOptions alloc]
             initWithDict:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }
         didFailWithError:&error];
@@ -41,96 +54,14 @@
 
 - (void)testSDKDefaultHub
 {
-    [SentrySDK initWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
     XCTAssertNotNil([SentrySDK.currentHub getClient]);
     [SentrySDK.currentHub bindClient:nil];
-    //[SentrySDK.currentHub reset];
 }
-
-// TODO(fetzig) write new test for custom hub
-//- (void)testSDKCustomHub {
-//    NSError *error = nil;
-//    SentryClient.logLevel = kSentryLogLevelNone;
-//    SentryClient *client = [[SentryClient alloc]
-//    initWithDsn:@"https://username:password@app.getsentry.com/12345"
-//    didFailWithError:&error];
-//
-//    SentryHub * hub = [[SentryHub alloc] init
-//    XCTAssertNotNil(hub);
-//    XCTAssertNotNil(SentryClient.sharedClient);
-//    [SentryHub.defaultHub reset];
-//    XCTAssertNil(SentryClient.sharedClient);
-//    hub = nil;
-//    XCTAssertNil(hub);
-//}
-
-// TODO
-//- (void)testCrash {
-//    NSError *error = nil;
-//    SentryClient *client = [[SentryClient alloc]
-//    initWithDsn:@"https://username:password@app.getsentry.com/12345"
-//    didFailWithError:&error]; [client crash];
-//}
-
-// TODO
-//- (void)testCrashedLastLaunch {
-//    NSError *error = nil;
-//    SentryClient *client = [[SentryClient alloc]
-//    initWithDsn:@"https://username:password@app.getsentry.com/12345"
-//    didFailWithError:&error]; XCTAssertFalse([client crashedLastLaunch]);
-//}
-
-//- (void)testBreadCrumbTracking {
-//    NSError *error = nil;
-//    SentryClient *client = [[SentryClient alloc]
-//    initWithDsn:@"https://username:password@app.getsentry.com/123456"
-//    didFailWithError:&error]; SentryScope *scope = [SentryScope new];
-//
-//    [scope.breadcrumbs clear];
-//    [SentrySDK enableAutomaticBreadcrumbTracking];
-//    XCTAssertEqual(scope.breadcrumbs.count, (unsigned long)0);
-//
-//    [SentrySDK.currentHub bindClient:client];
-//    [SentrySDK enableAutomaticBreadcrumbTracking];
-//    [SentrySDK.currentHub configureScope:^(SentryScope * _Nonnull scope) {
-//
-//        // TEST(fetzig): either this requires some XCT-ansync magic, or use
-//        something else than configureScope
-//        XCTAssertEqual(scope.breadcrumbs.count, (unsigned long)1);
-//    }];
-//    [SentrySDK.currentHub bindClient:nil];
-//    [scope.breadcrumbs clear];
-//}
-
-//- (void)testSDKBreadCrumbTracking {
-//    [SentrySDK startWithOptionsDict:@{@"dsn":
-//    @"https://username:password@app.getsentry.com/12345"}];
-//    [SentrySDK.currentHub configureScope:^(SentryScope * _Nonnull scope) {
-//
-//        [scope.breadcrumbs clear];
-//        // TEST(fetzig): either this requires some XCT-ansync magic, or use
-//        something else than configureScope
-//        XCTAssertEqual(scope.breadcrumbs.count, (unsigned long)1);
-//    }];
-//
-//    [SentrySDK enableAutomaticBreadcrumbTracking];
-//    [SentrySDK.currentHub configureScope:^(SentryScope * _Nonnull scope) {
-//        // TEST(fetzig): either this requires some XCT-ansync magic, or use
-//        something else than configureScope
-//        XCTAssertEqual(scope.breadcrumbs.count, (unsigned long)1);
-//    }];
-//
-//    // [SentrySDK.currentHub reset];
-//}
 
 - (void)testSDKBreadCrumbAdd
 {
-    [SentrySDK initWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
-    // TODO(fetzig)
-    //[[SentrySDK.currentHub getClient].breadcrumbs clear];
-
-    // XCTAssertEqual([SentryHub.defaultHub getClient].breadcrumbs.count,
-    // (unsigned long)0);
+    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
 
     SentryBreadcrumb *crumb = [[SentryBreadcrumb alloc] initWithLevel:kSentryLevelInfo
                                                              category:@"testCategory"];
@@ -139,78 +70,30 @@
     crumb.data = @{ @"testDataKey" : @"testDataVaue" };
 
     [SentrySDK addBreadcrumb:crumb];
-
-    // XCTAssertEqual([SentryHub.defaultHub getClient].breadcrumbs.count,
-    // (unsigned long)1);
-    // TODO(fetzig)
-    //[[SentrySDK.currentHub getClient].breadcrumbs clear];
-
-    //[SentrySDK.currentHub reset];
 }
 
 - (void)testSDKCaptureEvent
 {
-    [SentrySDK initWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
 
     SentryEvent *event = [[SentryEvent alloc] initWithLevel:kSentryLevelFatal];
 
     event.timestamp = [NSDate date];
-    event.message = @"testy test";
+    event.message = [[SentryMessage alloc] initWithFormatted:@"testy test"];
 
     [SentrySDK captureEvent:event];
-
-    // TODO(fetzig)
-    //[SentrySDK.currentHub reset];
 }
 
 - (void)testSDKCaptureError
 {
-    [SentrySDK initWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
 
     NSError *error =
         [NSError errorWithDomain:@"testworld"
                             code:200
                         userInfo:@{ NSLocalizedDescriptionKey : @"test ran out of money" }];
     [SentrySDK captureError:error];
-
-    // TODO(fetzig)
-    //[SentrySDK.currentHub reset];
 }
-
-//- (void)testSDKCaptureException {
-//    [SentrySDK startWithOptionsDict:@{@"dsn":
-//    @"https://username:password@app.getsentry.com/12345"}];
-//    XCTAssertNotNil([SentrySDK.currentHub getClient]);
-//    @try{
-//        @throw [[NSException alloc] initWithName:@"test" reason:@"Testing"
-//        userInfo:nil];
-//    }
-//    @catch(NSException *e){
-//        [SentrySDK captureException:e];
-//        // TODO(fetzig): check if we can add some assertion to this
-//        //[SentrySDK.currentHub reset];
-//    }
-//    XCTAssertNil([SentrySDK.currentHub getClient]);
-//}
-
-//- (void)testSDKCaptureMessage {
-//    [SentrySDK startWithOptionsDict:@{@"dsn":
-//    @"https://username:password@app.getsentry.com/12345"}];
-//    XCTAssertNotNil([SentrySDK.currentHub getClient]);
-//    [SentrySDK captureMessage:@"test message"];
-//    // TODO(fetzig)
-//    //[SentryHub.defaultHub reset];
-//    XCTAssertNil([SentrySDK.currentHub getClient]);
-//}
-
-//- (void)testUserException {
-//    NSError *error = nil;
-//    SentryClient *client = [[SentryClient alloc]
-//    initWithDsn:@"https://username:password@app.getsentry.com/12345"
-//    didFailWithError:&error]; [client reportUserException:@"a" reason:@"b"
-//    language:@"c" lineOfCode:@"1" stackTrace:[NSArray new] logAllThreads:YES
-//    terminateProgram:NO];
-//}
 
 - (void)testLevelNames
 {
@@ -233,25 +116,26 @@
 
 - (void)testDateCategory
 {
-    NSDate *date = [NSDate date];
+    NSTimeInterval timeInterval = 1605888590.123;
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:timeInterval];
     XCTAssertEqual(
-        (NSInteger)[
-            [NSDate sentry_fromIso8601String:[date sentry_toIso8601String]] timeIntervalSince1970],
-        (NSInteger)[date timeIntervalSince1970]);
+        [[NSDate sentry_fromIso8601String:[date sentry_toIso8601String]] timeIntervalSince1970],
+        timeInterval);
 }
 
-- (void)testBreadcrumbTracker
+- (void)testDateCategoryPrecision
 {
-    XCTAssertEqualObjects(@"sentry_ios_cocoapods.ViewController",
-        [SentryBreadcrumbTracker
-            sanitizeViewControllerName:@"<sentry_ios_cocoapods.ViewController: 0x7fd9201253c0>"]);
-    XCTAssertEqualObjects(@"sentry_ios_cocoapodsViewController: 0x7fd9201253c0",
-        [SentryBreadcrumbTracker
-            sanitizeViewControllerName:@"sentry_ios_cocoapodsViewController: 0x7fd9201253c0"]);
-    XCTAssertEqualObjects(@"sentry_ios_cocoapods.ViewController.miau",
-        [SentryBreadcrumbTracker
-            sanitizeViewControllerName:
-                @"<sentry_ios_cocoapods.ViewController.miau: 0x7fd9201253c0>"]);
+    NSDate *date1 = [NSDate dateWithTimeIntervalSinceReferenceDate:0.1234];
+    XCTAssertEqualObjects([date1 sentry_toIso8601String], @"2001-01-01T00:00:00.123Z");
+
+    NSDate *date2 = [NSDate dateWithTimeIntervalSinceReferenceDate:0.9995];
+    XCTAssertEqualObjects([date2 sentry_toIso8601String], @"2001-01-01T00:00:01.000Z");
+}
+
+- (void)testDateCategoryCompactibility
+{
+    NSDate *date = [NSDate sentry_fromIso8601String:@"2020-02-27T11:35:26Z"];
+    XCTAssertEqual([date timeIntervalSince1970], 1582803326.0);
 }
 
 @end

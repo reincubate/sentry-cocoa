@@ -61,13 +61,17 @@ handleException(NSException *exception, BOOL currentSnapshotUserReported)
 {
     SentryCrashLOG_DEBUG(@"Trapped exception %@", exception);
     if (g_isEnabled) {
-        sentrycrashmc_suspendEnvironment();
+        thread_act_array_t threads = NULL;
+        mach_msg_type_number_t numThreads = 0;
+        sentrycrashmc_suspendEnvironment(&threads, &numThreads);
         sentrycrashcm_notifyFatalExceptionCaptured(false);
 
         SentryCrashLOG_DEBUG(@"Filling out context.");
         NSArray *addresses = [exception callStackReturnAddresses];
         NSUInteger numFrames = addresses.count;
         uintptr_t *callstack = malloc(numFrames * sizeof(*callstack));
+        assert(callstack != NULL);
+
         for (NSUInteger i = 0; i < numFrames; i++) {
             callstack[i] = (uintptr_t)[addresses[i] unsignedLongLongValue];
         }
@@ -98,12 +102,13 @@ handleException(NSException *exception, BOOL currentSnapshotUserReported)
 
         free(callstack);
         if (currentSnapshotUserReported) {
-            sentrycrashmc_resumeEnvironment();
+            sentrycrashmc_resumeEnvironment(threads, numThreads);
         }
         if (g_previousUncaughtExceptionHandler != NULL) {
             SentryCrashLOG_DEBUG(@"Calling original exception handler.");
             g_previousUncaughtExceptionHandler(exception);
         }
+        sentrycrash_async_backtrace_decref(cursor.async_caller);
     }
 }
 

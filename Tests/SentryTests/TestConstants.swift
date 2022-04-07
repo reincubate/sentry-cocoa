@@ -1,12 +1,20 @@
 import XCTest
 
 struct TestConstants {
-    static let dsnAsString: String = "https://username:password@app.getsentry.com/12345"
-
-    static var dsn: SentryDsn {
+    
+    /**
+     * Real dsn for integration tests.
+     */
+    static let realDSN: String = "https://a92d50327ac74b8b9aa4ea80eccfb267@o447951.ingest.sentry.io/5428557"
+    
+    static func dsnAsString(username: String) -> String {
+        return "https://\(username):password@app.getsentry.com/12345"
+    }
+    
+    static func dsn(username: String) -> SentryDsn {
         var dsn: SentryDsn?
         do {
-            dsn = try SentryDsn(string: self.dsnAsString)
+            dsn = try SentryDsn(string: self.dsnAsString(username: username))
         } catch {
             XCTFail("SentryDsn could not be created")
         }
@@ -17,7 +25,7 @@ struct TestConstants {
     
     static var eventWithSerializationError: Event {
         let event = Event()
-        event.message = ""
+        event.message = SentryMessage(formatted: "")
         event.sdk = ["event": Event()]
         return event
     }

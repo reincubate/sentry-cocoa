@@ -7,12 +7,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Insert code here to initialize your application
         SentrySDK.start { options in
-            options.dsn = "https://8ee5199a90354faf995292b15c196d48@o19635.ingest.sentry.io/4394"
+            options.dsn = "https://a92d50327ac74b8b9aa4ea80eccfb267@o447951.ingest.sentry.io/5428557"
             options.debug = true
-            options.logLevel = SentryLogLevel.verbose
-            options.enableAutoSessionTracking = true
-            options.attachStacktrace = true
             options.sessionTrackingIntervalMillis = 5_000
+            // Sampling 100% - In Production you probably want to adjust this
+            options.tracesSampleRate = 1.0
+            options.enableFileIOTracking = true
+        }
+        
+        SentrySDK.configureScope { scope in
+            if let path = Bundle.main.path(forResource: "Tongariro", ofType: "jpg") {
+                scope.add(Attachment(path: path, filename: "Tongariro.jpg", contentType: "image/jpeg"))
+            }
+            
+            if let data = "hello".data(using: .utf8) {
+                scope.add(Attachment(data: data, filename: "log.txt"))
+            }
         }
     }
 

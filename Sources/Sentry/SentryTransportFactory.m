@@ -1,16 +1,17 @@
-#import <Foundation/Foundation.h>
-
+#import "SentryTransportFactory.h"
 #import "SentryDefaultRateLimits.h"
+#import "SentryDispatchQueueWrapper.h"
 #import "SentryEnvelopeRateLimit.h"
 #import "SentryHttpDateParser.h"
 #import "SentryHttpTransport.h"
+#import "SentryNSURLRequestBuilder.h"
 #import "SentryOptions.h"
 #import "SentryQueueableRequestManager.h"
 #import "SentryRateLimitParser.h"
 #import "SentryRateLimits.h"
 #import "SentryRetryAfterHeaderParser.h"
 #import "SentryTransport.h"
-#import "SentryTransportFactory.h"
+#import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -26,7 +27,9 @@ SentryTransportFactory ()
 {
     NSURLSessionConfiguration *configuration =
         [NSURLSessionConfiguration ephemeralSessionConfiguration];
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration
+                                                          delegate:options.urlSessionDelegate
+                                                     delegateQueue:nil];
     id<SentryRequestManager> requestManager =
         [[SentryQueueableRequestManager alloc] initWithSession:session];
 
@@ -41,11 +44,19 @@ SentryTransportFactory ()
     SentryEnvelopeRateLimit *envelopeRateLimit =
         [[SentryEnvelopeRateLimit alloc] initWithRateLimits:rateLimits];
 
+    dispatch_queue_attr_t attributes = dispatch_queue_attr_make_with_qos_class(
+        DISPATCH_QUEUE_SERIAL, DISPATCH_QUEUE_PRIORITY_LOW, 0);
+    SentryDispatchQueueWrapper *dispatchQueueWrapper =
+        [[SentryDispatchQueueWrapper alloc] initWithName:"sentry-http-transport"
+                                              attributes:attributes];
+
     return [[SentryHttpTransport alloc] initWithOptions:options
-                                      sentryFileManager:sentryFileManager
-                                   sentryRequestManager:requestManager
-                                       sentryRateLimits:rateLimits
-                                sentryEnvelopeRateLimit:envelopeRateLimit];
+                                            fileManager:sentryFileManager
+                                         requestManager:requestManager
+                                         requestBuilder:[[SentryNSURLRequestBuilder alloc] init]
+                                             rateLimits:rateLimits
+                                      envelopeRateLimit:envelopeRateLimit
+                                   dispatchQueueWrapper:dispatchQueueWrapper];
 }
 
 @end

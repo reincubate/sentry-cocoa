@@ -1,6 +1,11 @@
 import XCTest
 
 class SentrySerializationTests: XCTestCase {
+    
+    private class Fixture {
+        static var invalidData = "hi".data(using: .utf8)!
+        static var traceState = SentryTraceState(trace: SentryId(), publicKey: "PUBLIC_KEY", releaseName: "RELEASE_NAME", environment: "TEST", transaction: "Some Transaction", user: SentryTraceStateUser(userId: "User Id", segment: "some segment"))
+    }
 
     func testSentryEnvelopeSerializer_WithSingleEvent() {
         // Arrange
@@ -20,6 +25,7 @@ class SentrySerializationTests: XCTestCase {
             XCTAssertEqual("event", envelope.items[0].header.type)
             XCTAssertEqual(envelope.items[0].header.length, deserializedEnvelope.items[0].header.length)
             XCTAssertEqual(envelope.items[0].data, deserializedEnvelope.items[0].data)
+            XCTAssertNil(deserializedEnvelope.header.traceState)
         }
     }
 
@@ -86,16 +92,38 @@ class SentrySerializationTests: XCTestCase {
 
     func testSentryEnvelopeSerializer_SdkInfo() {
         let sdkInfo = SentrySdkInfo(name: "sentry.cocoa", andVersion: "5.0.1")
-        let envelopeHeader = SentryEnvelopeHeader(id: nil, andSdkInfo: sdkInfo)
+        let envelopeHeader = SentryEnvelopeHeader(id: nil, sdkInfo: sdkInfo, traceState: nil)
         let envelope = SentryEnvelope(header: envelopeHeader, singleItem: createItemWithEmptyAttachment())
 
         assertEnvelopeSerialization(envelope: envelope) { deserializedEnvelope in
             XCTAssertEqual(sdkInfo, deserializedEnvelope.header.sdkInfo)
         }
     }
+    
+    func testSentryEnvelopeSerializer_TraceState() {
+        let envelopeHeader = SentryEnvelopeHeader(id: nil, traceState: Fixture.traceState)
+        let envelope = SentryEnvelope(header: envelopeHeader, singleItem: createItemWithEmptyAttachment())
 
+        assertEnvelopeSerialization(envelope: envelope) { deserializedEnvelope in
+            XCTAssertNotNil(deserializedEnvelope.header.traceState)
+            assertTraceState(firstTrace: Fixture.traceState, secondTrace: deserializedEnvelope.header.traceState!)
+        }
+    }
+    
+    func testSentryEnvelopeSerializer_TraceStateWithoutUser() {
+        let trace = SentryTraceState(trace: SentryId(), publicKey: "PUBLIC_KEY", releaseName: "RELEASE_NAME", environment: "TEST", transaction: "Some Transaction", user: nil)
+        
+        let envelopeHeader = SentryEnvelopeHeader(id: nil, traceState: trace)
+        let envelope = SentryEnvelope(header: envelopeHeader, singleItem: createItemWithEmptyAttachment())
+
+        assertEnvelopeSerialization(envelope: envelope) { deserializedEnvelope in
+            XCTAssertNotNil(deserializedEnvelope.header.traceState)
+            assertTraceState(firstTrace: trace, secondTrace: deserializedEnvelope.header.traceState!)
+        }
+    }
+    
     func testSentryEnvelopeSerializer_SdkInfoIsNil() {
-        let envelopeHeader = SentryEnvelopeHeader(id: nil, andSdkInfo: nil)
+        let envelopeHeader = SentryEnvelopeHeader(id: nil, sdkInfo: nil, traceState: nil)
         let envelope = SentryEnvelope(header: envelopeHeader, singleItem: createItemWithEmptyAttachment())
 
         assertEnvelopeSerialization(envelope: envelope) { deserializedEnvelope in
@@ -109,7 +137,7 @@ class SentrySerializationTests: XCTestCase {
     }
 
     func testSentryEnvelopeSerializer_EnvelopeWithHeaderAndItemWithAttachmet() {
-        let eventId = "12c2d058-d584-4270-9aa2-eca08bf20986"
+        let eventId = SentryId(uuidString: "12c2d058-d584-4270-9aa2-eca08bf20986")
         let payloadAsString = "helloworld"
 
         let itemData = """
@@ -119,7 +147,7 @@ class SentrySerializationTests: XCTestCase {
                        """.data(using: .utf8)!
 
         if let envelope = SentrySerialization.envelope(with: itemData) {
-            XCTAssertEqual(eventId, envelope.header.eventId)
+            XCTAssertEqual(eventId, envelope.header.eventId!)
 
             XCTAssertEqual(1, envelope.items.count)
             let item = envelope.items[0]
@@ -144,6 +172,77 @@ class SentrySerializationTests: XCTestCase {
     func testSentryEnvelopeSerializer_WithoutLineBreak() {
         let itemData = "{}".data(using: .utf8)!
         XCTAssertNil(SentrySerialization.envelope(with: itemData))
+    }
+    
+    func testSerializeSession() throws {
+        let dict = SentrySession(releaseName: "1.0.0").serialize()
+        let session = SentrySession(jsonObject: dict)!
+        
+        let data = try SentrySerialization.data(with: session)
+        
+        XCTAssertNotNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithNoReleaseName() throws {
+        var dict = SentrySession(releaseName: "1.0.0").serialize()
+        dict["attrs"] = nil // Remove release name
+        let session = SentrySession(jsonObject: dict)!
+        
+        let data = try SentrySerialization.data(with: session)
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithEmptyReleaseName() throws {
+        let dict = SentrySession(releaseName: "").serialize()
+        let session = SentrySession(jsonObject: dict)!
+        
+        let data = try SentrySerialization.data(with: session)
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithGarbageInDict() throws {
+        var dict = SentrySession(releaseName: "").serialize()
+        dict["started"] = "20"
+        let data = try SentrySerialization.data(withJSONObject: dict)
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testSerializeSessionWithGarbage() throws {
+        guard let data = "started".data(using: .ascii) else {
+            XCTFail("Failed to create data"); return
+        }
+        
+        XCTAssertNil(SentrySerialization.session(with: data))
+    }
+    
+    func testLevelFromEventData() {
+        let envelopeItem = SentryEnvelopeItem(event: TestData.event)
+        
+        let level = SentrySerialization.level(from: envelopeItem.data)
+        XCTAssertEqual(TestData.event.level, level)
+    }
+    
+    func testLevelFromEventData_WithGarbage() {
+        let level = SentrySerialization.level(from: Fixture.invalidData)
+        XCTAssertEqual(SentryLevel.error, level)
+    }
+    
+    func testAppStateWithValidData_ReturnsValidAppState() throws {
+        let appState = TestData.appState
+        let appStateData = try SentrySerialization.data(withJSONObject: appState.serialize())
+        
+        let actual = SentrySerialization.appState(with: appStateData)
+        
+        XCTAssertEqual(appState, actual)
+    }
+    
+    func testAppStateWithInvalidData_ReturnsNil() throws {
+        let actual = SentrySerialization.appState(with: Fixture.invalidData)
+        
+        XCTAssertNil(actual)
     }
 
     private func serializeEnvelope(envelope: SentryEnvelope) -> Data {
@@ -178,5 +277,15 @@ class SentrySerializationTests: XCTestCase {
     private func assertDefaultSdkInfoSet(deserializedEnvelope: SentryEnvelope) {
         let sdkInfo = SentrySdkInfo(name: SentryMeta.sdkName, andVersion: SentryMeta.versionString)
         XCTAssertEqual(sdkInfo, deserializedEnvelope.header.sdkInfo)
+    }
+    
+    func assertTraceState(firstTrace: SentryTraceState, secondTrace: SentryTraceState) {
+        XCTAssertEqual(firstTrace.traceId, secondTrace.traceId)
+        XCTAssertEqual(firstTrace.publicKey, secondTrace.publicKey)
+        XCTAssertEqual(firstTrace.releaseName, secondTrace.releaseName)
+        XCTAssertEqual(firstTrace.transaction, secondTrace.transaction)
+        XCTAssertEqual(firstTrace.environment, secondTrace.environment)
+        XCTAssertEqual(firstTrace.user?.userId, secondTrace.user?.userId)
+        XCTAssertEqual(firstTrace.user?.segment, secondTrace.user?.segment)
     }
 }

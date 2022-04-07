@@ -4,22 +4,35 @@ import XCTest
 class SentryStacktraceBuilderTests: XCTestCase {
     
     private class Fixture {
-        func getSut() -> SentryStacktraceBuilder {
-            SentryStacktraceBuilder()
+        let queue = DispatchQueue(label: "SentryStacktraceBuilderTests")
+
+        var sut: SentryStacktraceBuilder {
+            return SentryStacktraceBuilder(crashStackEntryMapper: SentryCrashStackEntryMapper(inAppLogic: SentryInAppLogic(inAppIncludes: [], inAppExcludes: [])))
         }
     }
-    
-    private let fixture = Fixture()
+
+    private var fixture: Fixture!
+
+    override func setUp() {
+        super.setUp()
+        fixture = Fixture()
+        clearTestState()
+    }
+
+    override func tearDown() {
+        super.tearDown()
+        clearTestState()
+    }
     
     func testEnoughFrames() {
-        let actual = fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 0)
+        let actual = fixture.sut.buildStacktraceForCurrentThread()
         
         // The stacktrace has usually more than 40 frames. Feel free to change the number if the tests are failing
-        XCTAssertTrue(30 < actual.frames.count, "Not enough stacktrace frames.")
+        XCTAssertTrue(30 < actual.frames.count, "Not enough stacktrace frames. It should be more than 30, but was \(actual.frames.count)")
     }
     
     func testFramesAreFilled() {
-        let actual = fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 0)
+        let actual = fixture.sut.buildStacktraceForCurrentThread()
         
         // We don't know the actual values of the frames so we can't write
         // deterministic tests here. Therefore we just make sure they are
@@ -33,7 +46,7 @@ class SentryStacktraceBuilderTests: XCTestCase {
     }
     
     func testFramesDontContainBuilderFunction() {
-        let actual = fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 0)
+        let actual = fixture.sut.buildStacktraceForCurrentThread()
         
         let result = actual.frames.contains { frame in
             return frame.function?.contains("buildStacktraceForCurrentThread") ?? false
@@ -43,34 +56,63 @@ class SentryStacktraceBuilderTests: XCTestCase {
     }
     
     func testFramesOrder() {
-        let actual = fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 0)
-        let lastFrame = actual.frames.last
-        let areFramesOrderedCorrect = lastFrame?.function?.contains("testFramesOrder") ?? false
+        let actual = fixture.sut.buildStacktraceForCurrentThread()
         
-        XCTAssertTrue(areFramesOrderedCorrect, "The frames must be ordered from caller to callee, or oldest to youngest.")
-    }
-    
-    func testSkippingFrames() {
-        // This function should be removed from the stacktrace
-        func wrapperFunc() -> Stacktrace {
-            fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 1)
-        }
-        let actual = wrapperFunc()
-        let result = actual.frames.contains { frame in
-            return frame.function?.contains("wrapperFunc") ?? false
+        // Make sure the first 4 frames contain main
+        let frames = actual.frames[...3]
+        let filteredFrames = frames.filter { frame in
+            return frame.function?.contains("main") ?? false
         }
         
-        XCTAssertFalse(result, "The stacktrace should not contain the wrapperFunc.")
-        
-         let noSkipping = fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 0)
-        // The count must be equal because the stacktrace of actual has one more
-        // function.
-        XCTAssertEqual(noSkipping.frames.count, actual.frames.count)
+        XCTAssertTrue(filteredFrames.count == 1, "The frames must be ordered from caller to callee, or oldest to youngest.")
     }
     
-    func testSkippingAllFrames() {
-        let actual = fixture.getSut().buildStacktraceForCurrentThread(framesToSkip: 1_000)
+    /**
+     * Disabled in CI for now, because this test is flaky.
+     */
+    func tesAsyncStacktraces() throws {
+        SentrySDK.start { options in
+            options.dsn = TestConstants.dsnAsString(username: "SentryStacktraceBuilderTests")
+            options.stitchAsyncCode = true
+        }
         
-        XCTAssertEqual(0, actual.frames.count)
+        let expect = expectation(description: "testAsyncStacktraces")
+
+        fixture.queue.async {
+            self.asyncFrame1(expect: expect)
+        }
+        
+        wait(for: [expect], timeout: 2)
+    }
+    
+    func asyncFrame1(expect: XCTestExpectation) {
+        fixture.queue.asyncAfter(deadline: DispatchTime.now()) {
+            self.asyncFrame2(expect: expect)
+        }
+    }
+    
+    func asyncFrame2(expect: XCTestExpectation) {
+        fixture.queue.async {
+            self.asyncAssertion(expect: expect)
+        }
+    }
+    
+    func asyncAssertion(expect: XCTestExpectation) {
+        let actual = fixture.sut.buildStacktraceForCurrentThread()
+
+        let filteredFrames = actual.frames.filter { frame in
+            return frame.function?.contains("testAsyncStacktraces") ?? false ||
+            frame.function?.contains("asyncFrame1") ?? false ||
+            frame.function?.contains("asyncFrame2") ?? false ||
+            frame.function?.contains("asyncAssertion") ?? false
+        }
+        let startFrames = actual.frames.filter { frame in
+            return frame.stackStart?.boolValue ?? false
+        }
+
+        XCTAssertTrue(filteredFrames.count >= 4, "The Stacktrace must include the async callers.")
+        XCTAssertTrue(startFrames.count >= 3, "The Stacktrace must have async continuation markers.")
+
+        expect.fulfill()
     }
 }

@@ -2,9 +2,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface SentrySdkInfo (Equality)
+@interface
+SentrySdkInfo (Equality)
 
-- (BOOL)isEqual:(id)object;
+- (BOOL)isEqual:(id _Nullable)object;
 
 - (NSUInteger)hash;
 

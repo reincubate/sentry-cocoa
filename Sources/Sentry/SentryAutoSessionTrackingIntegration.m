@@ -1,7 +1,7 @@
 #import "SentryAutoSessionTrackingIntegration.h"
 #import "SentryDefaultCurrentDateProvider.h"
-#import "SentryHub.h"
 #import "SentryLog.h"
+#import "SentryOptions+Private.h"
 #import "SentryOptions.h"
 #import "SentrySDK.h"
 #import "SentrySessionTracker.h"
@@ -17,17 +17,23 @@ SentryAutoSessionTrackingIntegration ()
 
 @implementation SentryAutoSessionTrackingIntegration
 
-- (void)installWithOptions:(nonnull SentryOptions *)options
+- (void)installWithOptions:(SentryOptions *)options
 {
-    if ([options.enableAutoSessionTracking isEqual:@YES]) {
-        id<SentryCurrentDateProvider> currentDateProvider =
-            [[SentryDefaultCurrentDateProvider alloc] init];
-        SentrySessionTracker *tracker =
-            [[SentrySessionTracker alloc] initWithOptions:options
-                                      currentDateProvider:currentDateProvider];
-        [tracker start];
-        self.tracker = tracker;
+    if (!options.enableAutoSessionTracking) {
+        [options removeEnabledIntegration:NSStringFromClass([self class])];
+        return;
     }
+
+    SentrySessionTracker *tracker = [[SentrySessionTracker alloc]
+            initWithOptions:options
+        currentDateProvider:[SentryDefaultCurrentDateProvider sharedInstance]];
+    [tracker start];
+    self.tracker = tracker;
+}
+
+- (void)uninstall
+{
+    [self stop];
 }
 
 - (void)stop

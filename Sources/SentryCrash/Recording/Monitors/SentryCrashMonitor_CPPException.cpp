@@ -80,6 +80,7 @@ void
 __cxa_throw(void *thrown_exception, std::type_info *tinfo, void (*dest)(void *))
 {
     if (g_captureNextStackTrace) {
+        sentrycrash_async_backtrace_decref(g_stackCursor.async_caller);
         sentrycrashsc_initSelfThread(&g_stackCursor, 1);
     }
 
@@ -96,7 +97,9 @@ __cxa_throw(void *thrown_exception, std::type_info *tinfo, void (*dest)(void *))
 static void
 CPPExceptionTerminate(void)
 {
-    sentrycrashmc_suspendEnvironment();
+    thread_act_array_t threads = NULL;
+    mach_msg_type_number_t numThreads = 0;
+    sentrycrashmc_suspendEnvironment(&threads, &numThreads);
     SentryCrashLOG_DEBUG("Trapped c++ exception");
     const char *name = NULL;
     std::type_info *tinfo = __cxxabiv1::__cxa_current_exception_type();
@@ -162,7 +165,7 @@ CPPExceptionTerminate(void)
         SentryCrashLOG_DEBUG("Detected NSException. Letting the current "
                              "NSException handler deal with it.");
     }
-    sentrycrashmc_resumeEnvironment();
+    sentrycrashmc_resumeEnvironment(threads, numThreads);
 
     SentryCrashLOG_DEBUG("Calling original terminate handler.");
     g_originalTerminateHandler();

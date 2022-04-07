@@ -4,18 +4,23 @@ import XCTest
 @available(OSX 10.10, *)
 class SentryCrashInstallationReporterTests: XCTestCase {
     
+    private static let dsnAsString = TestConstants.dsnAsString(username: "SentryCrashInstallationReporterTests")
+    
     private var testClient: TestClient!
     private var sut: SentryCrashInstallationReporter!
     
     override func setUp() {
-        sut = SentryCrashInstallationReporter()
+        super.setUp()
+        sut = SentryCrashInstallationReporter(inAppLogic: SentryInAppLogic(inAppIncludes: [], inAppExcludes: []))
         sut.install()
         // Works only if SentryCrash is installed
         sentrycrash_deleteAllReports()
     }
     
     override func tearDown() {
+        super.tearDown()
         sentrycrash_deleteAllReports()
+        clearTestState()
     }
     
     func testFaultyReportIsNotSentAndDeleted() throws {
@@ -36,9 +41,11 @@ class SentryCrashInstallationReporterTests: XCTestCase {
     
     private func sdkStarted() {
         SentrySDK.start { options in
-            options.dsn = TestConstants.dsnAsString
+            options.dsn = SentryCrashInstallationReporterTests.dsnAsString
         }
-        testClient = TestClient(options: Options())!
+        let options = Options()
+        options.dsn = SentryCrashInstallationReporterTests.dsnAsString
+        testClient = TestClient(options: options)!
         let hub = SentryHub(client: testClient, andScope: nil)
         SentrySDK.setCurrentHub(hub)
     }
@@ -57,7 +64,7 @@ class SentryCrashInstallationReporterTests: XCTestCase {
     }
     
     private func assertNoEventsSent() {
-        XCTAssertEqual(0, testClient.events.count)
+        XCTAssertEqual(0, testClient.captureEventWithScopeInvocations.count)
     }
     
     private func assertNoReportsStored() {

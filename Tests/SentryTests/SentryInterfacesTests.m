@@ -3,6 +3,7 @@
 
 #import "NSDate+SentryExtras.h"
 #import "SentryFileManager.h"
+#import "SentryId.h"
 #import "SentryMeta.h"
 
 @interface SentryInterfacesTests : XCTestCase
@@ -29,7 +30,6 @@
     debugMeta2.name = @"name";
     NSDictionary *serialized2 = @{
         @"image_addr" : @"0x0000000100034000",
-        @"image_addr" : @"0x02",
         @"image_size" : @(4),
         @"type" : @"1",
         @"name" : @"name",
@@ -84,13 +84,13 @@
     event.sdk = @{ @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString };
     event.extra = @{ @"__sentry_stacktrace" : @"f", @"date" : date };
     NSDictionary *serialized = @{
-        @"event_id" : event.eventId,
+        @"event_id" : [event.eventId sentryIdString],
         @"extra" : @ { @"date" : [date sentry_toIso8601String] },
         @"level" : @"info",
         @"environment" : @"bla",
         @"platform" : @"cocoa",
         @"sdk" : @ { @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event serialize], serialized);
 
@@ -98,11 +98,11 @@
     event2.timestamp = date;
     event2.sdk = @{ @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString };
     NSDictionary *serialized2 = @{
-        @"event_id" : event2.eventId,
+        @"event_id" : [event2.eventId sentryIdString],
         @"level" : @"info",
         @"platform" : @"cocoa",
         @"sdk" : @ { @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event2 serialize], serialized2);
 
@@ -111,18 +111,18 @@
     event3.sdk = @{
         @"version" : @"0.15.2",
         @"name" : @"sentry-react-native",
-        @"integrations" : @[ @"sentry-cocoa" ]
+        @"integrations" : @[ @"sentry.cocoa" ]
     };
     NSDictionary *serialized3 = @{
-        @"event_id" : event3.eventId,
+        @"event_id" : [event3.eventId sentryIdString],
         @"level" : @"info",
         @"platform" : @"cocoa",
         @"sdk" : @ {
             @"name" : @"sentry-react-native",
             @"version" : @"0.15.2",
-            @"integrations" : @[ @"sentry-cocoa" ]
+            @"integrations" : @[ @"sentry.cocoa" ]
         },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event3 serialize], serialized3);
 
@@ -130,14 +130,14 @@
     event4.timestamp = date;
     event4.sdk = @{ @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString };
     event4.extra =
-        @{ @"key" : @ { @1 : @"1", @2 : [NSDate dateWithTimeIntervalSince1970:1582803326] } };
+        @{ @"key" : @ { @1 : @"1", @2 : [NSDate dateWithTimeIntervalSince1970:1582803326.1235] } };
     NSDictionary *serialized4 = @{
-        @"event_id" : event4.eventId,
-        @"extra" : @ { @"key" : @ { @"1" : @"1", @"2" : @"2020-02-27T11:35:26Z" } },
+        @"event_id" : [event4.eventId sentryIdString],
+        @"extra" : @ { @"key" : @ { @"1" : @"1", @"2" : @"2020-02-27T11:35:26.124Z" } },
         @"level" : @"info",
         @"platform" : @"cocoa",
         @"sdk" : @ { @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event4 serialize], serialized4);
 }
@@ -152,10 +152,10 @@
     event.sdk = @{
         @"version" : @"0.15.2",
         @"name" : @"sentry-react-native",
-        @"integrations" : @[ @"sentry-cocoa" ]
+        @"integrations" : @[ @"sentry.cocoa" ]
     };
     NSDictionary *serialized = @{
-        @"event_id" : event.eventId,
+        @"event_id" : [event.eventId sentryIdString],
         @"level" : @"info",
         @"extra" : @ {},
         @"transaction" : @"yoyoyo",
@@ -163,9 +163,9 @@
         @"sdk" : @ {
             @"name" : @"sentry-react-native",
             @"version" : @"0.15.2",
-            @"integrations" : @[ @"sentry-cocoa" ]
+            @"integrations" : @[ @"sentry.cocoa" ]
         },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event serialize], serialized);
 
@@ -175,19 +175,19 @@
     event3.sdk = @{
         @"version" : @"0.15.2",
         @"name" : @"sentry-react-native",
-        @"integrations" : @[ @"sentry-cocoa" ]
+        @"integrations" : @[ @"sentry.cocoa" ]
     };
     NSDictionary *serialized3 = @{
-        @"event_id" : event3.eventId,
+        @"event_id" : [event3.eventId sentryIdString],
         @"level" : @"info",
         @"transaction" : @"UIViewControllerTest",
         @"platform" : @"cocoa",
         @"sdk" : @ {
             @"name" : @"sentry-react-native",
             @"version" : @"0.15.2",
-            @"integrations" : @[ @"sentry-cocoa" ]
+            @"integrations" : @[ @"sentry.cocoa" ]
         },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event3 serialize], serialized3);
     SentryEvent *event4 = [[SentryEvent alloc] initWithLevel:kSentryLevelInfo];
@@ -206,24 +206,24 @@
     };
     event4.sdk = @{ @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString };
     NSDictionary *serialized4 = @{
-        @"event_id" : event4.eventId,
+        @"event_id" : [event4.eventId sentryIdString],
         @"extra" : @ {
             @"key" : @ {
                 @"1" : @"1",
                 @"2" : @2,
                 @"3" : @ { @"a" : @0 },
                 @"4" : @[
-                    @"1", @2, @{ @"a" : @0 }, @[ @"a" ], @"2020-02-27T11:35:26Z",
+                    @"1", @2, @{ @"a" : @0 }, @[ @"a" ], @"2020-02-27T11:35:26.000Z",
                     @"https://sentry.io"
                 ],
-                @"5" : @"2020-02-27T11:35:26Z",
+                @"5" : @"2020-02-27T11:35:26.000Z",
                 @"6" : @"https://sentry.io"
             }
         },
         @"level" : @"info",
         @"platform" : @"cocoa",
         @"sdk" : @ { @"name" : @"sentry.cocoa", @"version" : SentryMeta.versionString },
-        @"timestamp" : [date sentry_toIso8601String]
+        @"timestamp" : @(date.timeIntervalSince1970)
     };
     XCTAssertEqualObjects([event4 serialize], serialized4);
 }
@@ -234,15 +234,6 @@
     eventEmptyDist.releaseName = @"abc";
     XCTAssertNil([[eventEmptyDist serialize] objectForKey:@"dist"]);
     XCTAssertEqualObjects([[eventEmptyDist serialize] objectForKey:@"release"], @"abc");
-}
-
-- (void)testEventDataStoring
-{
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{ @"id" : @"1234" }
-                                                       options:0
-                                                         error:nil];
-    SentryEvent *event = [[SentryEvent alloc] initWithJSON:jsonData];
-    XCTAssertNil([[event serialize] objectForKey:@"json"]);
 }
 
 - (void)testStacktrace
@@ -366,7 +357,9 @@
     thread2.stacktrace = [[SentryStacktrace alloc] initWithFrames:@[ frame ]
                                                         registers:@{ @"a" : @"1" }];
 
-    exception2.thread = thread2;
+    exception2.threadId = thread2.threadId;
+    exception2.stacktrace = thread2.stacktrace;
+
     exception2.mechanism = [[SentryMechanism alloc] initWithType:@"test"];
     exception2.module = @"module";
     NSDictionary *serialized2 = @{
@@ -383,12 +376,6 @@
 
     XCTAssertEqualObjects([exception2 serialize], serialized2);
 }
-
-//- (void)testContext {
-//    SentryContext *context = [[SentryContext alloc] init];
-//    XCTAssertNotNil(context);
-//    XCTAssertEqual([context serialize].count, (unsigned long)3);
-//}
 
 - (void)testBreadcrumb
 {
@@ -423,76 +410,5 @@
     };
     XCTAssertEqualObjects([crumb2 serialize], serialized2);
 }
-
-//- (void)testBreadcrumbStore {
-//    SentryBreadcrumbs *store = [[SentryBreadcrumbs alloc] init];
-//    [store clear];
-//    SentryBreadcrumb *crumb = [[SentryBreadcrumb alloc]
-//    initWithLevel:kSentryLevelInfo category:@"http"]; [store
-//    addBreadcrumb:crumb]; NSDate *date = [NSDate date]; crumb.timestamp =
-//    date; NSDictionary *serialized = @{
-//                                 @"breadcrumbs": @[
-//                                        @{
-//                                            @"level": @"info",
-//                                            @"category": @"http",
-//                                            @"timestamp": [date
-//                                            sentry_toIso8601String]
-//                                            }
-//                                        ]
-//                                 };
-//    XCTAssertEqualObjects([store serialize], serialized);
-//    [store clear];
-//}
-
-//- (void)testEventSdkIntegrations {
-//    NSDate *date = [NSDate date];
-//    SentryEvent *event = [[SentryEvent alloc] initWithLevel:kSentryLevelInfo];
-//    event.timestamp = date;
-//    event.environment = @"bla";
-//    event.infoDict = @{@"CFBundleIdentifier": @"a",
-//    @"CFBundleShortVersionString": @"b", @"CFBundleVersion": @"c"};
-//    event.extra = @{@"__sentry_stacktrace": @"f",
-//    @"__sentry_sdk_integrations": @[@"react-native"]}; NSDictionary
-//    *serialized = @{@"contexts": [[[SentryContext alloc] init] serialize],
-//                                 @"event_id": event.eventId,
-//                                 @"extra": [NSDictionary new],
-//                                 @"level": @"info",
-//                                 @"environment": @"bla",
-//                                 @"platform": @"cocoa",
-//                                 @"release": @"a-b",
-//                                 @"dist": @"c",
-//                                 @"sdk": @{@"name": @"sentry-cocoa",
-//                                 @"version": SentryMeta.versionString,
-//                                 @"integrations": @[@"react-native"]},
-//                                 @"timestamp": [date sentry_toIso8601String]};
-//    XCTAssertEqualObjects([event serialize], serialized);
-//
-//}
-
-//- (void)testEventFingerprint {
-//    NSDate *date = [NSDate date];
-//    SentryEvent *event = [[SentryEvent alloc] initWithLevel:kSentryLevelInfo];
-//    [event setFingerprint:@[@"test"]];
-//    event.environment = @"bla";
-//    event.infoDict = @{@"CFBundleIdentifier": @"a",
-//    @"CFBundleShortVersionString": @"b", @"CFBundleVersion": @"c"};
-//    event.extra = @{@"__sentry_stacktrace": @"f",
-//    @"__sentry_sdk_integrations": @[@"react-native"]}; NSDictionary
-//    *serialized = @{@"contexts": [[[SentryContext alloc] init] serialize],
-//                                 @"event_id": event.eventId,
-//                                 @"extra": [NSDictionary new],
-//                                 @"level": @"info",
-//                                 @"environment": @"bla",
-//                                 @"fingerprint": @[@"test"],
-//                                 @"platform": @"cocoa",
-//                                 @"release": @"a-b",
-//                                 @"dist": @"c",
-//                                 @"sdk": @{@"name": @"sentry-cocoa",
-//                                 @"version": SentryMeta.versionString,
-//                                 @"integrations": @[@"react-native"]},
-//                                 @"timestamp": [date sentry_toIso8601String]};
-//    XCTAssertEqualObjects([event serialize], serialized);
-//
-//}
 
 @end

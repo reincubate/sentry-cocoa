@@ -7,60 +7,60 @@
 
 # Contributing
 
-We welcome suggested improvements and bug fixes for `sentry-cocoa`, in the form of pull requests on [`GitHub`](https://github.com/getsentry/sentry-cocoa). Please follow our official [Commit Guidelines](https://develop.sentry.dev/code-review/#commit-guidelines). The guide below will help you get started, but if you have further questions, please feel free to reach out on [Discord](https://discord.gg/Ww9hbqr).
+We welcome suggested improvements and bug fixes for `sentry-cocoa`, in the form of pull requests. Please follow our official [Commit Guidelines](https://develop.sentry.dev/code-review/#commit-guidelines) and also prefix the title of your PR according to the [Commit Guidelines](https://develop.sentry.dev/code-review/#commit-guidelines). The guide below will help you get started, but if you have further questions, please feel free to reach out on [Discord](https://discord.gg/Ww9hbqr).
 
 ## Setting up an Environment
 
-You need to install bundler and all dependencies locally to run tests:
+Run `make init` to get started. This will install `bundler` and `Homebrew` and their managed dependencies (see `Gemfile` and `Brewfile`).
 
-```
-gem install bundler
-bundle install
-```
+## Tests
 
+The tests depend on our test server. To run the automated tests, you first need to have the server running locally with
 
-All Objective-C, C and C++ needs to be formatted with [Clang Format](http://clang.llvm.org/docs/ClangFormat.html). The configuration can be found in [`.clang-format`](./.clang-format). To install Clang Format:
-
-```
-npm install -g clang-format
-# OR
-brew install clang-format
-# OR
-apt-get install clang-format
+```sh
+make run-test-server
 ```
 
-[Install SwiftLint](https://github.com/realm/SwiftLint#installation) for linting and 
-formatting Swift code.
+Test guidelines:
 
-With that, the repo is fully set up and you are ready to run all commands.
+* We write our tests in Swift. When touching a test file written in Objective-C consider converting it to Swift and then add your tests.
+* Make use of the fixture pattern for test setup code. For examples, checkout [SentryClientTest](/Tests/SentryTests/SentryClientTest.swift) or [SentryHttpTransportTests](/Tests/SentryTests/SentryHttpTransportTests.swift).
+* Use [TestData](/Tests/SentryTests/Protocol/TestData.swift) when possible to avoid setting up data classes with test values.
 
-## Run Tests
+Test can either be ran inside from Xcode or via
 
-Test can either be ran inside from Xcode or using [`fastlane`](https://docs.fastlane.tools/):
-
-```
-bundle exec fastlane test
-# OR
-make test 
+```sh
+make test
 ```
 
 ## Code Formatting
-Only PRs with properly formatted code are acccepted. To format all code run:
+Please follow the convention of removing the copyright code comments at the top of files. We only keep them inside [SentryCrash](/SentryCrash/),
+as the code is based on [KSCrash](https://github.com/kstenerud/KSCrash).
 
-```
+All Objective-C, C and C++ needs to be formatted with [Clang Format](http://clang.llvm.org/docs/ClangFormat.html). The configuration can be found in [`.clang-format`](./.clang-format). Simply run the make task before submitting your changes for review:
+
+```sh
 make format
 ```
 
 ## Linting
-We use Swiftlint and Clang-Format. For Swiftlint we keep a seperate [config file](/Tests/.swiftlint) for the tests. To run all the linters locally execute:
+We use [Swiftlint](https://github.com/realm/SwiftLint) and Clang-Format. For Swiftlint we keep a seperate [config file](/Tests/.swiftlint) for the tests. To run all the linters locally execute:
 
-```
+```sh
 make lint
 ```
 
 ## Environment
 
 Please use `Sentry.xcworkspace` as the entry point when opening the project in Xcode. It also contains all samples for different environments.
+
+## Public Headers
+
+To make a header public follow these steps:
+
+* Move it into the folder [Public](/Sources/Sentry/Public). Both [CocoaPods](Sentry.podspec) and [Swift Package Manager](Package.swift) make all headers in this folder public.
+* Add it to the Umbrella Header [Sentry.h](/Sources/Sentry/Public/Sentry.h).
+* Set the target membership to public.
 
 ## Final Notes
 

@@ -14,7 +14,7 @@ struct ContentView: View {
     }
     
     var captureErrorAction: () -> Void = {
-        let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "Object does not exist"])
+        let error = NSError(domain: "SampleErrorDomain", code: 1, userInfo: [NSLocalizedDescriptionKey: "Object does not exist"])
         SentrySDK.capture(error: error) { (scope) in
             scope.setTag(value: "value", key: "myTag")
         }
@@ -25,6 +25,13 @@ struct ContentView: View {
         let scope = Scope()
         scope.setLevel(.fatal)
         SentrySDK.capture(exception: exception, scope: scope)
+    }
+    
+    var captureTransaction: () -> Void = {
+        let transaction = SentrySDK.startTransaction(name: "Some Transaction", operation: "some operation")
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.4...0.6), execute: {
+            transaction.finish()
+        })
     }
     
     var body: some View {
@@ -44,6 +51,10 @@ struct ContentView: View {
                 
                 Button(action: captureNSExceptionAction) {
                     Text("Capture NSException")
+                }
+                
+                Button(action: captureTransaction) {
+                    Text("Capture Transaction")
                 }
             }
         }
