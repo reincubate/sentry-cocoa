@@ -22,6 +22,7 @@ class TraceTestViewController: UIViewController {
         }
         let session = URLSession(configuration: URLSessionConfiguration.default)
         let dataTask = session.dataTask(with: imgUrl) { (data, _, error) in
+            //Simulated delay in the download
             DispatchQueue.main.async {
                 if let err = error {
                     SentrySDK.capture(error: err)
@@ -29,13 +30,13 @@ class TraceTestViewController: UIViewController {
                     self.imageView.image = UIImage(data: image)
                     self.appendLifeCycleStep("GET https://sentry-brand.storage.googleapis.com/sentry-logo-black.png")
                 }
+                SentrySDK.reportFullyDisplayed()
             }
         }
         
         dataTask.resume()
         spanObserver = createTransactionObserver(forCallback: assertTransaction)
         appendLifeCycleStep("viewWillAppear")
-        appendLifeCycleStep("viewAppearing")
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -60,21 +61,23 @@ class TraceTestViewController: UIViewController {
     }
     
     func assertTransaction(span: Span) {
-        spanObserver?.releaseOnFinish()
-        guard let children = span.children() else {
-            UIAssert.fail("Transaction has no children")
-            return
+        DispatchQueue.main.async {
+            self.spanObserver?.releaseOnFinish()
+            guard let children = span.children() else {
+                UIAssert.fail("Transaction has no children")
+                return
+            }
+
+            guard let child = children.first(where: { $0.operation == "http.client" }) else {
+                UIAssert.fail("Did not found http request child")
+                return
+            }
+
+            UIAssert.isEqual(child.data["url"] as? String, "https://sentry-brand.storage.googleapis.com/sentry-logo-black.png", "Could not read url data value")
+
+            UIAssert.isEqual(child.data["http.response.status_code"] as? String, "200", "Could not read status_code tag value")
+
+            UIAssert.checkForViewControllerLifeCycle(span, viewController: "TraceTestViewController", stepsToCheck: self.lifeCycleSteps)
         }
- 
-        guard let child = children.first(where: { $0.context.operation == "http.client" }) else {
-            UIAssert.fail("Did not found http request child")
-            return
-        }
-        
-        UIAssert.isEqual(child.data?["url"] as? String, "/sentry-logo-black.png", "Could not read url data value")
-        
-        UIAssert.isEqual(child.tags["http.status_code"], "200", "Could not read status_code tag value")
-                
-        UIAssert.checkForViewControllerLifeCycle(span, viewController: "TraceTestViewController", stepsToCheck: lifeCycleSteps)
     }
 }

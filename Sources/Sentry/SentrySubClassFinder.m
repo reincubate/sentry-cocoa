@@ -5,6 +5,10 @@
 #import <objc/runtime.h>
 #import <string.h>
 
+#if SENTRY_HAS_UIKIT
+#    import <UIKit/UIKit.h>
+#endif // SENTRY_HAS_UIKIT
+
 @interface
 SentrySubClassFinder ()
 
@@ -25,13 +29,13 @@ SentrySubClassFinder ()
     return self;
 }
 
+#if SENTRY_HAS_UIKIT
 - (void)actOnSubclassesOfViewControllerInImage:(NSString *)imageName block:(void (^)(Class))block;
 {
     [self.dispatchQueue dispatchAsyncWithBlock:^{
-        Class viewControllerClass = NSClassFromString(@"UIViewController");
+        Class viewControllerClass = [UIViewController class];
         if (viewControllerClass == nil) {
-            [SentryLog logWithMessage:@"UIViewController class not found."
-                             andLevel:kSentryLevelDebug];
+            SENTRY_LOG_DEBUG(@"UIViewController class not found.");
             return;
         }
 
@@ -47,31 +51,39 @@ SentrySubClassFinder ()
         // NSObject:isSubclassOfClass as not all classes in the runtime in classes inherit from
         // NSObject and a call to isSubclassOfClass would call the initializer of the class, which
         // we can't allow because of the problem with UIViewControllers mentioned above.
+        //
+        // Turn out the approach to search all the view controllers inside the app binary image is
+        // fast and we don't need to include this restriction that will cause confusion.
+        // In a project with 1000 classes (a big project), it took only ~3ms to check all classes.
         NSMutableArray<NSString *> *classesToSwizzle = [NSMutableArray new];
         for (int i = 0; i < count; i++) {
             NSString *className = [NSString stringWithUTF8String:classes[i]];
-            if ([className containsString:@"ViewController"]) {
-                Class class = NSClassFromString(className);
-                if ([self isClass:class subClassOf:viewControllerClass]) {
-                    [classesToSwizzle addObject:className];
-                }
+            Class class = NSClassFromString(className);
+            if ([self isClass:class subClassOf:viewControllerClass]) {
+                [classesToSwizzle addObject:className];
             }
         }
 
         free(classes);
-
-        [self.dispatchQueue dispatchOnMainQueue:^{
+        [self.dispatchQueue dispatchAsyncOnMainQueue:^{
             for (NSString *className in classesToSwizzle) {
                 block(NSClassFromString(className));
             }
+
+            [SentryLog
+                logWithMessage:[NSString stringWithFormat:@"The following UIViewControllers will "
+                                                          @"generate automatic transactions: %@",
+                                         [classesToSwizzle componentsJoinedByString:@", "]]
+                      andLevel:kSentryLevelDebug];
         }];
     }];
 }
+#endif // SENTRY_HAS_UIKIT
 
 - (BOOL)isClass:(Class)childClass subClassOf:(Class)parentClass
 {
     if (!childClass || childClass == parentClass) {
-        return false;
+        return NO;
     }
 
     // Using a do while loop, like pointed out in Cocoa with Love

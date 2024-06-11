@@ -1,33 +1,50 @@
+#if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
+
 import Sentry
+import SentryTestUtils
+import SentryTestUtilsDynamic
 import XCTest
 
-#if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
 class SentryUIViewControllerSwizzlingTests: XCTestCase {
     
     private class Fixture {
         let dispatchQueue = TestSentryDispatchQueueWrapper()
         let objcRuntimeWrapper = SentryTestObjCRuntimeWrapper()
         let subClassFinder: TestSubClassFinder
+        let processInfoWrapper = SentryNSProcessInfoWrapper()
+        let binaryImageCache: SentryBinaryImageCache
         
         init() {
             subClassFinder = TestSubClassFinder(dispatchQueue: dispatchQueue, objcRuntimeWrapper: objcRuntimeWrapper)
+            binaryImageCache = SentryDependencyContainer.sharedInstance().binaryImageCache
         }
-        
+         
         var options: Options {
-            let options = Options()
+            let options = Options.noIntegrations()
+            
             let imageName = String(
                 cString: class_getImageName(SentryUIViewControllerSwizzlingTests.self)!,
                 encoding: .utf8)! as NSString
             options.add(inAppInclude: imageName.lastPathComponent)
+            
+            let externalImageName = String(
+                cString: class_getImageName(ExternalUIViewController.self)!,
+                encoding: .utf8)! as NSString
+            options.add(inAppInclude: externalImageName.lastPathComponent)
+            
             return options
         }
         
         var sut: SentryUIViewControllerSwizzling {
-            return SentryUIViewControllerSwizzling(options: options, dispatchQueue: dispatchQueue, objcRuntimeWrapper: objcRuntimeWrapper, subClassFinder: subClassFinder)
+            return SentryUIViewControllerSwizzling(options: options, dispatchQueue: dispatchQueue, objcRuntimeWrapper: objcRuntimeWrapper, subClassFinder: subClassFinder, processInfoWrapper: processInfoWrapper, binaryImageCache: binaryImageCache)
+        }
+        
+        var sutWithDefaultObjCRuntimeWrapper: SentryUIViewControllerSwizzling {
+            return SentryUIViewControllerSwizzling(options: options, dispatchQueue: dispatchQueue, objcRuntimeWrapper: SentryDefaultObjCRuntimeWrapper.sharedInstance(), subClassFinder: subClassFinder, processInfoWrapper: processInfoWrapper, binaryImageCache: binaryImageCache)
         }
         
         var testableSut: TestSentryUIViewControllerSwizzling {
-            return TestSentryUIViewControllerSwizzling(options: options, dispatchQueue: dispatchQueue, objcRuntimeWrapper: objcRuntimeWrapper, subClassFinder: subClassFinder)
+            return TestSentryUIViewControllerSwizzling(options: options, dispatchQueue: dispatchQueue, objcRuntimeWrapper: objcRuntimeWrapper, subClassFinder: subClassFinder, processInfoWrapper: processInfoWrapper, binaryImageCache: binaryImageCache)
         }
         
         var delegate: MockApplication.MockApplicationDelegate {
@@ -49,6 +66,20 @@ class SentryUIViewControllerSwizzlingTests: XCTestCase {
         super.tearDown()
         clearTestState()
     }
+    
+    func testExternalViewControllerImage() {
+        //Test to ensure ExternalUIViewController exists in an external lib
+        //just in case someone changes the settings of the `SentryTestUtils` lib
+        let imageName = String(
+            cString: class_getImageName(SentryUIViewControllerSwizzlingTests.self)!,
+            encoding: .utf8)! as NSString
+        
+        let externalImageName = String(
+            cString: class_getImageName(ExternalUIViewController.self)!,
+            encoding: .utf8)! as NSString
+        
+        XCTAssertNotEqual(externalImageName, imageName, "ExternalUIViewController is not in an external library.")
+    }
 
     func testShouldSwizzle_TestViewController() {
         let result = fixture.sut.shouldSwizzleViewController(TestViewController.self)
@@ -68,18 +99,33 @@ class SentryUIViewControllerSwizzlingTests: XCTestCase {
     }
     
     func testUIViewController_loadView_noTransactionBoundToScope() {
+        fixture.sut.start()
         let controller = UIViewController()
         controller.loadView()
         XCTAssertNil(SentrySDK.span)
     }
     
     func testViewControllerWithoutLoadView_TransactionBoundToScope() {
+        fixture.sut.start()
         let controller = TestViewController()
         controller.loadView()
+        let span = SentrySDK.span
+        
+        //To finish the transaction we need to finish `initialDisplay` span
+        //by calling `viewWillAppear` and reporting a new frame
+        controller.viewWillAppear(false)
+        //This will call SentryTimeToDisplayTracker.framesTrackerHasNewFrame and finish the span its managing.
+        Dynamic(SentryDependencyContainer.sharedInstance().framesTracker).reportNewFrame()
+        
         XCTAssertNotNil(SentrySDK.span)
+        controller.viewDidAppear(false)
+        XCTAssertTrue(span?.isFinished == true)
     }
     
     func testViewControllerWithLoadView_TransactionBoundToScope() {
+        let d = class_getImageName(type(of: self))!
+        fixture.processInfoWrapper.setProcessPath(String(cString: d))
+
         fixture.sut.start()
         let controller = ViewWithLoadViewController()
         
@@ -88,8 +134,8 @@ class SentryUIViewControllerSwizzlingTests: XCTestCase {
         let span = SentrySDK.span
         XCTAssertNotNil(span)
         
-        let transactionName = Dynamic(span).name.asString
-        let expectedTransactionName = SentryUIViewControllerSanitizer.sanitizeViewControllerName(controller)
+        let transactionName = Dynamic(span).transactionContext.name.asString
+        let expectedTransactionName = SwiftDescriptor.getObjectClassName(controller)
         XCTAssertEqual(expectedTransactionName, transactionName)
     }
 
@@ -109,6 +155,14 @@ class SentryUIViewControllerSwizzlingTests: XCTestCase {
         } else {
             XCTAssertEqual(swizzler.viewControllers.count, 0)
         }
+    }
+    
+    func testSwizzlingOfExternalLibs() {
+        let sut = fixture.sut
+        sut.start()
+        let controller = ExternalUIViewController()
+        controller.loadView()
+        XCTAssertNotNil(SentrySDK.span)
     }
     
     func testSwizzle_fromScene_invalidNotification_NoObject() {
@@ -155,15 +209,21 @@ class SentryUIViewControllerSwizzlingTests: XCTestCase {
     }
     
     func testSwizzle_fromApplication_noWindowMethod() {
-        XCTAssertFalse(fixture.sut.swizzleRootViewController(from: MockApplication(MockApplication.MockApplicationDelegateNoWindow())))
+        let mockApplicationDelegate = MockApplication.MockApplicationDelegateNoWindow()
+        let mockApplication = MockApplication(mockApplicationDelegate)
+        XCTAssertFalse(fixture.sut.swizzleRootViewController(from: mockApplication))
     }
     
     func testSwizzle_fromApplication_noWindow() {
-        XCTAssertFalse(fixture.sut.swizzleRootViewController(from: MockApplication(MockApplication.MockApplicationDelegate(nil))))
+        let mockApplicationDelegate = MockApplication.MockApplicationDelegate(nil)
+        let mockApplication = MockApplication(mockApplicationDelegate)
+        XCTAssertFalse(fixture.sut.swizzleRootViewController(from: mockApplication))
     }
-    
+
     func testSwizzle_fromApplication_noRootViewController_InWindow() {
-        XCTAssertFalse(fixture.sut.swizzleRootViewController(from: MockApplication(MockApplication.MockApplicationDelegate(UIWindow()))))
+        let mockApplicationDelegate = MockApplication.MockApplicationDelegate(UIWindow())
+        let mockApplication = MockApplication(mockApplicationDelegate)
+        XCTAssertFalse(fixture.sut.swizzleRootViewController(from: mockApplication))
     }
     
     func testSwizzle_fromApplication() {
@@ -172,48 +232,45 @@ class SentryUIViewControllerSwizzlingTests: XCTestCase {
         XCTAssertTrue(fixture.sut.swizzleRootViewController(from: MockApplication(delegate)))
     }
     
-    func testSwizzleSubViewControllers_ImageNameIsNULL_NotCalled() {
-        let imageName = UnsafeMutablePointer<CChar>(nil)
-        fixture.objcRuntimeWrapper.imageName = UnsafePointer(imageName)
-        
-        // We must keep one strong reference to the delegate. The mock has only a weak.
-        let delegate = fixture.delegate
-        fixture.sut.swizzleAllSubViewControllers(inApp: MockApplication(delegate))
+    func testSwizzleUIViewControllersOfClassesInImageOf_ClassIsNull() {
+        fixture.sut.swizzleUIViewControllersOfClasses(inImageOf: nil)
         
         XCTAssertEqual(0, fixture.subClassFinder.invocations.count)
     }
     
-    func testSwizzleSubViewControllers_ImageName_Called() {
-        let imageName = "imageName"
-        let bytes: [CChar] = imageName.cString(using: .ascii)!
-        let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
-        pointer.initialize(from: bytes, count: bytes.count)
-        fixture.objcRuntimeWrapper.imageName = UnsafePointer(pointer)
+    func testSwizzleUIViewControllersOfClassesInImageOf_ClassIsFromUIKit_NotSwizzled() {
+        let sut = fixture.sutWithDefaultObjCRuntimeWrapper
         
-        // We must keep one strong reference to the delegate. The mock has only a weak.
-        let delegate = fixture.delegate
-        fixture.sut.swizzleAllSubViewControllers(inApp: MockApplication(delegate))
+        sut.swizzleUIViewControllersOfClasses(inImageOf: UIViewController.self)
+        
+        XCTAssertEqual(0, fixture.subClassFinder.invocations.count)
+    }
+    
+    func testSwizzleUIViewControllersOfClassesInImageOf_OtherClass_Swizzled() {
+        let sut = fixture.sutWithDefaultObjCRuntimeWrapper
+        
+        sut.swizzleUIViewControllersOfClasses(inImageOf: XCTestCase.self)
         
         XCTAssertEqual(1, fixture.subClassFinder.invocations.count)
-        
-        XCTAssertEqual(imageName, fixture.subClassFinder.invocations.first?.imageName)
     }
     
-    func testSwizzleSubViewControllers_ImageNameIsGarbage_NotCalled() {
-        let bytes: [CChar] = [0, 2, 3, 4]
-        let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
-        pointer.initialize(from: bytes, count: bytes.count)
-        fixture.objcRuntimeWrapper.imageName = UnsafePointer(pointer)
+    func testSwizzleUIViewControllersOfClassesInImageOf_SameClass_OnceSwizzled() {
+        let sut = fixture.sutWithDefaultObjCRuntimeWrapper
         
-        // We must keep one strong reference to the delegate. The mock has only a weak.
-        let delegate = fixture.delegate
-        fixture.sut.swizzleAllSubViewControllers(inApp: MockApplication(delegate))
+        sut.swizzleUIViewControllersOfClasses(inImageOf: XCTestCase.self)
+        sut.swizzleUIViewControllersOfClasses(inImageOf: XCTestCase.self)
         
-        XCTAssertEqual(0, fixture.subClassFinder.invocations.count)
+        XCTAssertEqual(1, fixture.subClassFinder.invocations.count)
+    }
+
+    func testSwizzlingFromProcessPath_WhenNoAppToFind() {
+        let sut = fixture.testableSut
+        sut.start()
+        XCTAssertTrue(sut.swizzleUIViewControllersOfImageCalled)
     }
 }
 
-class MockApplication: NSObject, SentryUIApplication {
+class MockApplication: NSObject, SentryUIApplicationProtocol {
     class MockApplicationDelegate: NSObject, UIApplicationDelegate {
         var window: UIWindow?
         
@@ -235,12 +292,13 @@ class MockApplication: NSObject, SentryUIApplication {
     }
 }
 
+// swiftlint:disable prohibited_super_call
 class ViewWithLoadViewController: UIViewController {
     override func loadView() {
-        super.loadView()
         // empty on purpose
     }
 }
+// swiftlint:enable prohibited_super_call
 
 class ObjectWithWindowsProperty: NSObject {
     var resultOfWindows: Any?
@@ -259,9 +317,15 @@ class ObjectWithWindowsProperty: NSObject {
 class TestSentryUIViewControllerSwizzling: SentryUIViewControllerSwizzling {
     
     var viewControllers = [UIViewController]()
+    var swizzleUIViewControllersOfImageCalled = false
     
     override func swizzleRootViewControllerAndDescendant(_ rootViewController: UIViewController) {
         viewControllers.append(rootViewController)
+    }
+
+    override func swizzleUIViewControllers(ofImage imageName: String) {
+        swizzleUIViewControllersOfImageCalled = true
+        super.swizzleUIViewControllers(ofImage: imageName)
     }
 }
 
@@ -270,7 +334,8 @@ class TestSubClassFinder: SentrySubClassFinder {
     var invocations = Invocations<(imageName: String, block: (AnyClass) -> Void)>()
     override func actOnSubclassesOfViewController(inImage imageName: String, block: @escaping (AnyClass) -> Void) {
         invocations.record((imageName, block))
+        super.actOnSubclassesOfViewController(inImage: imageName, block: block)
     }
 }
 
-#endif
+#endif // os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)

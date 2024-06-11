@@ -1,3 +1,5 @@
+import Nimble
+import SentryTestUtils
 import XCTest
 
 class SentryPerformanceTrackingIntegrationTests: XCTestCase {
@@ -26,7 +28,7 @@ class SentryPerformanceTrackingIntegrationTests: XCTestCase {
         
         let options = Options()
         options.tracesSampleRate = 0.1
-        options.enableAutoPerformanceTracking = false
+        options.enableAutoPerformanceTracing = false
         sut.install(with: options)
 
         XCTAssertNil(Dynamic(sut).swizzling.asObject)
@@ -43,27 +45,48 @@ class SentryPerformanceTrackingIntegrationTests: XCTestCase {
         XCTAssertNil(Dynamic(sut).swizzling.asObject)
     }
     
-    func testAutoPerformanceDisabled_DisablesIntegration() {
+    func testAutoPerformanceDisabled() {
         let options = Options()
-        options.enableAutoPerformanceTracking = false
+        options.enableAutoPerformanceTracing = false
         
         disablesIntegration(options)
     }
     
-    func testUIViewControllerDisabled_DisablesIntegration() {
+    func testUIViewControllerDisabled() {
         let options = Options()
-        options.enableUIViewControllerTracking = false
+        options.enableUIViewControllerTracing = false
         
         disablesIntegration(options)
     }
     
     private func disablesIntegration(_ options: Options) {
         let sut = SentryPerformanceTrackingIntegration()
-        sut.install(with: options)
+        let result = sut.install(with: options)
         
-        let expexted = Options.defaultIntegrations().filter { !$0.contains("PerformanceTracking") }
-        assertArrayEquals(expected: expexted, actual: Array(options.enabledIntegrations))
+        XCTAssertFalse(result)
         XCTAssertNil(Dynamic(sut).swizzling.asObject)
+    }
+
+    func testConfigure_waitForDisplay() {
+        let sut = SentryPerformanceTrackingIntegration()
+
+        let options = Options()
+        options.tracesSampleRate = 0.1
+        options.enableTimeToFullDisplayTracing = true
+        sut.install(with: options)
+
+        XCTAssertTrue(SentryUIViewControllerPerformanceTracker.shared.enableWaitForFullDisplay)
+    }
+
+    func testConfigure_dontWaitForDisplay() {
+        let sut = SentryPerformanceTrackingIntegration()
+
+        let options = Options()
+        options.tracesSampleRate = 0.1
+        options.enableTimeToFullDisplayTracing = false
+        sut.install(with: options)
+
+        XCTAssertFalse(SentryUIViewControllerPerformanceTracker.shared.enableWaitForFullDisplay)
     }
     
 #endif

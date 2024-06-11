@@ -29,26 +29,17 @@ SentryNSURLRequest ()
                                  didFailWithError:(NSError *_Nullable *_Nullable)error
 {
     NSDictionary *serialized = [event serialize];
-    NSData *jsonData = [SentrySerialization dataWithJSONObject:serialized error:error];
+    NSData *jsonData = [SentrySerialization dataWithJSONObject:serialized];
     if (nil == jsonData) {
-        if (error) {
-            // TODO: We're possibly overriding an error set by the actual
-            // code that failed ^
-            *error = NSErrorFromSentryError(
-                kSentryErrorJsonConversionError, @"Event cannot be converted to JSON");
-        }
+        SENTRY_LOG_ERROR(@"Event cannot be converted to JSON");
         return nil;
     }
 
     if ([SentrySDK.currentHub getClient].options.debug == YES) {
-        [SentryLog logWithMessage:@"Sending JSON -------------------------------"
-                         andLevel:kSentryLevelDebug];
-        [SentryLog logWithMessage:[NSString stringWithFormat:@"%@",
-                                            [[NSString alloc] initWithData:jsonData
-                                                                  encoding:NSUTF8StringEncoding]]
-                         andLevel:kSentryLevelDebug];
-        [SentryLog logWithMessage:@"--------------------------------------------"
-                         andLevel:kSentryLevelDebug];
+        SENTRY_LOG_DEBUG(@"Sending JSON -------------------------------");
+        SENTRY_LOG_DEBUG(
+            @"%@", [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding]);
+        SENTRY_LOG_DEBUG(@"--------------------------------------------");
     }
     return [self initStoreRequestWithDsn:dsn andData:jsonData didFailWithError:error];
 }
@@ -74,20 +65,33 @@ SentryNSURLRequest ()
     return self;
 }
 
-// TODO: Get refactored out to be a single init method
 - (_Nullable instancetype)initEnvelopeRequestWithDsn:(SentryDsn *)dsn
                                              andData:(NSData *)data
                                     didFailWithError:(NSError *_Nullable *_Nullable)error
 {
     NSURL *apiURL = [dsn getEnvelopeEndpoint];
-    self = [super initWithURL:apiURL
+    NSString *authHeader = newAuthHeader(dsn.url);
+
+    return [self initEnvelopeRequestWithURL:apiURL
+                                    andData:data
+                                 authHeader:authHeader
+                           didFailWithError:error];
+}
+
+- (instancetype)initEnvelopeRequestWithURL:(NSURL *)url
+                                   andData:(NSData *)data
+                                authHeader:(nullable NSString *)authHeader
+                          didFailWithError:(NSError *_Nullable *_Nullable)error
+{
+    self = [super initWithURL:url
                   cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
               timeoutInterval:SentryRequestTimeout];
     if (self) {
-        NSString *authHeader = newAuthHeader(dsn.url);
-
         self.HTTPMethod = @"POST";
-        [self setValue:authHeader forHTTPHeaderField:@"X-Sentry-Auth"];
+
+        if (authHeader != nil) {
+            [self setValue:authHeader forHTTPHeaderField:@"X-Sentry-Auth"];
+        }
         [self setValue:@"application/x-sentry-envelope" forHTTPHeaderField:@"Content-Type"];
         [self setValue:SentryMeta.sdkName forHTTPHeaderField:@"User-Agent"];
         [self setValue:@"gzip" forHTTPHeaderField:@"Content-Encoding"];
@@ -112,9 +116,6 @@ newAuthHeader(NSURL *url)
         appendFormat:@"%@,",
         newHeaderPart(@"sentry_client",
             [NSString stringWithFormat:@"%@/%@", SentryMeta.sdkName, SentryMeta.versionString])];
-    [string
-        appendFormat:@"%@,",
-        newHeaderPart(@"sentry_timestamp", @((NSInteger)[[NSDate date] timeIntervalSince1970]))];
     [string appendFormat:@"%@", newHeaderPart(@"sentry_key", url.user)];
     if (nil != url.password) {
         [string appendFormat:@",%@", newHeaderPart(@"sentry_secret", url.password)];

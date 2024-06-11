@@ -11,6 +11,11 @@ class TableViewController: UITableViewController {
         spanObserver = createTransactionObserver(forCallback: assertTransaction)
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        SentrySDK.reportFullyDisplayed()
+    }
+    
     func assertTransaction(span: Span) {
         spanObserver?.releaseOnFinish()
         UIAssert.checkForViewControllerLifeCycle(span, viewController: "TableViewController")

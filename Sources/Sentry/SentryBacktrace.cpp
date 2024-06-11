@@ -13,33 +13,17 @@
 #    include "SentryTime.h"
 
 #    include <cassert>
-
-#    if __has_include(<ptrauth.h>)
-#        include <ptrauth.h>
-#    else
-#        define ptrauth_strip(__value, __key) __value
-#    endif
+#    include <cstring>
+#    include <dispatch/dispatch.h>
 
 using namespace sentry::profiling;
 using namespace sentry::profiling::thread;
-
-#    define LIKELY(x) __builtin_expect(!!(x), 1)
-#    define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
 namespace {
 ALWAYS_INLINE bool
 isValidFrame(std::uintptr_t frame, const StackBounds &bounds)
 {
     return bounds.contains(frame) && StackFrame::isAligned(frame);
-}
-
-ALWAYS_INLINE std::uintptr_t
-stripPtrAuthentication(std::uintptr_t retAddr)
-{
-    // https://github.com/apple/darwin-xnu/blob/8f02f2a044b9bb1ad951987ef5bab20ec9486310/osfmk/kern/backtrace.c#L120
-    return reinterpret_cast<std::uintptr_t>(
-        ptrauth_strip(reinterpret_cast<void *>(getPreviousInstructionAddress(retAddr)),
-            ptrauth_key_return_address));
 }
 
 constexpr std::size_t kMaxBacktraceDepth = 128;
@@ -64,7 +48,7 @@ namespace profiling {
             return 0;
         }
         if (LIKELY(skip == 0)) {
-            addresses[depth++] = getProgramCounter(&machineContext);
+            addresses[depth++] = getPreviousInstructionAddress(getProgramCounter(&machineContext));
         } else {
             skip--;
         }
@@ -72,7 +56,7 @@ namespace profiling {
             const auto lr = getLinkRegister(&machineContext);
             if (isValidFrame(lr, bounds)) {
                 if (LIKELY(skip == 0)) {
-                    addresses[depth++] = stripPtrAuthentication(lr);
+                    addresses[depth++] = getPreviousInstructionAddress(lr);
                 } else {
                     skip--;
                 }
@@ -84,6 +68,7 @@ namespace profiling {
         } else {
             current = getFrameAddress(&machineContext);
         }
+
         // Even if this bounds check passes, the frame pointer address could still be invalid if the
         // thread was suspended in an inconsistent state. The best we can do is to detect these
         // situations at symbolication time on the server and filter them out -- there's not an easy
@@ -92,11 +77,12 @@ namespace profiling {
         if (UNLIKELY(!isValidFrame(current, bounds))) {
             return 0;
         }
+
         bool reachedEndOfStack = false;
         while (depth < maxDepth) {
             const auto frame = reinterpret_cast<StackFrame *>(current);
             if (LIKELY(skip == 0)) {
-                addresses[depth++] = stripPtrAuthentication(frame->returnAddress);
+                addresses[depth++] = getPreviousInstructionAddress(frame->returnAddress);
             } else {
                 skip--;
             }
@@ -108,6 +94,7 @@ namespace profiling {
                 break;
             }
         }
+
         if (LIKELY(reachedEndOfStackPtr != nullptr)) {
             *reachedEndOfStackPtr = reachedEndOfStack;
         }
@@ -120,30 +107,44 @@ namespace profiling {
     {
         const auto pair = ThreadHandle::allExcludingCurrent();
         for (const auto &thread : pair.first) {
+            Backtrace bt;
+            // This one is probably safe to call while the thread is suspended, but
+            // being conservative here in case the platform time functions take any
+            // locks that we're not aware of.
+            bt.absoluteTimestamp = getAbsoluteTime();
+
+            // Log an empty stack for an idle thread, we don't need to walk the stack.
             if (thread->isIdle()) {
+                bt.threadMetadata.threadID = thread->tid();
+                bt.threadMetadata.priority = -1;
+                f(bt);
                 continue;
             }
-            Backtrace bt;
+
             auto metadata = cache->metadataForThread(*thread);
             if (metadata.threadID == 0) {
                 continue;
             } else {
                 bt.threadMetadata = std::move(metadata);
             }
+
             // This function calls `pthread_from_mach_thread_np`, which takes a lock,
             // so we must read the value before suspending the thread to avoid risking
             // a deadlock. See the comment below.
             const auto stackBounds = thread->stackBounds();
 
-            // This one is probably safe to call while the thread is suspended, but
-            // being conservative here in case the platform time functions take any
-            // locks that we're not aware of.
-            bt.absoluteTimestamp = getAbsoluteTime();
-
             // ############################################
             // DEADLOCK WARNING: It is not safe to call any functions that acquire a
             // lock between here and `thread->resume()` -- this may cause a deadlock.
-            // Pay special attention to functions that may end up calling any of the
+            //
+            // Heap allocations are unsafe, because `nanov2_malloc` takes an unfair
+            // lock.
+            // libsystem_kernel.dylib`__ulock_wait + 8
+            // frame #1: 0x000000020dfcd9ac libsystem_platform.dylib`_os_unfair_lock_lock_slow + 172
+            // frame #2: 0x00000001aeabe1d8 libsystem_malloc.dylib`nanov2_allocate + 244
+            // frame #3: 0x00000001aeabe080 libsystem_malloc.dylib`nanov2_malloc + 64
+            //
+            // Also pay special attention to functions that may end up calling any of the
             // pthread_*_np functions, which typically take a lock used by other
             // OS APIs like GCD. You can see the full list of functions that take the
             // lock by going here and searching for `_pthread_list_lock:
@@ -159,10 +160,10 @@ namespace profiling {
                 &reachedEndOfStack, kMaxBacktraceDepth, 0);
 
             thread->resume();
+
             // ############################################
             // END DEADLOCK WARNING
             // ############################################
-
             // Consider the backtraces only if we're able to collect the full stack
             if (reachedEndOfStack) {
                 for (std::remove_const<decltype(depth)>::type i = 0; i < depth; i++) {

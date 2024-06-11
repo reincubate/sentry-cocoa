@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  TestThread.h
 //
@@ -30,5 +31,6 @@
 @interface TestThread : NSThread
 
 @property (nonatomic, readwrite, assign) thread_t thread;
+@property (nonatomic, strong) NSObject *notificationObject;
 
 @end

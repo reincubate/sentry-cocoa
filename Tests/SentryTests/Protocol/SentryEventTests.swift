@@ -1,11 +1,17 @@
 import Sentry
+import SentryTestUtils
 import XCTest
 
 class SentryEventTests: XCTestCase {
+    
+    override func tearDown() {
+        super.tearDown()
+        clearTestState()
+    }
 
     func testInitWithLevel() {
         let dateProvider = TestCurrentDateProvider()
-        CurrentDate.setCurrentDateProvider(dateProvider)
+        SentryDependencyContainer.sharedInstance().dateProvider = dateProvider
         
         let event = Event(level: .debug)
         
@@ -41,14 +47,17 @@ class SentryEventTests: XCTestCase {
         XCTAssertNotNil(actual["user"] as? [String: Any])
         XCTAssertEqual(TestData.event.modules, actual["modules"] as? [String: String])
         XCTAssertNotNil(actual["stacktrace"] as? [String: Any])
+        XCTAssertNotNil(actual["request"] as? [String: Any])
         
         let crumbs = actual["breadcrumbs"] as? [[String: Any]]
         XCTAssertNotNil(crumbs)
         XCTAssertEqual(1, crumbs?.count)
         
         let context = actual["contexts"] as? [String: [String: Any]]
-        XCTAssertEqual(1, context?.count)
-        XCTAssertEqual(TestData.context["context"], context?["context"] as? [String: String])
+        XCTAssertEqual(context?.count, 1)
+        XCTAssertEqual(context?["context"]?.count, 2)
+        XCTAssertEqual(context?["context"]?["c"] as! String, "a")
+        XCTAssertEqual(context?["context"]?["date"] as! String, "1970-01-01T00:00:10.000Z")
         
         XCTAssertNotNil(actual["message"] as? [String: Any])
         
@@ -73,16 +82,6 @@ class SentryEventTests: XCTestCase {
         let actual = event.serialize()
         XCTAssertEqual(TestData.timestamp.timeIntervalSince1970, actual["start_timestamp"] as? TimeInterval
         )
-    }
-    
-    func testSerializeWithExtraTransaction() {
-        let event = TestData.event
-        event.transaction = nil
-        let sentryTransaction = "trans"
-        event.extra?["__sentry_transaction"] = sentryTransaction
-        
-        let actual = event.serialize()
-        XCTAssertEqual(sentryTransaction, actual["transaction"] as? String)
     }
     
     func testSerializeWithoutBreadcrumbs() {

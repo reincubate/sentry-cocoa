@@ -2,18 +2,15 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+FOUNDATION_EXPORT NSString *const kSentryDefaultEnvironment;
+
 @interface
-SentryOptions (Private)
+SentryOptions ()
+#if SENTRY_TARGET_PROFILING_SUPPORTED
+@property (nonatomic, assign) BOOL enableProfiling_DEPRECATED_TEST_ONLY;
+#endif // SENTRY_TARGET_PROFILING_SUPPORTED
 
-@property (nullable, nonatomic, copy, readonly) NSNumber *defaultTracesSampleRate;
-
-- (BOOL)isValidSampleRate:(NSNumber *)sampleRate;
-
-- (BOOL)isValidTracesSampleRate:(NSNumber *)tracesSampleRate;
-
-@property (nonatomic, strong, readonly) NSSet<NSString *> *enabledIntegrations;
-
-- (void)removeEnabledIntegration:(NSString *)integration;
+SENTRY_EXTERN BOOL isValidSampleRate(NSNumber *sampleRate);
 
 @end
 

@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashCachedData.c
 //
@@ -24,7 +25,7 @@
 
 #include "SentryCrashCachedData.h"
 
-//#define SentryCrashLogger_LocalLevel TRACE
+// #define SentryCrashLogger_LocalLevel TRACE
 #include "SentryCrashLogger.h"
 
 #include <errno.h>
@@ -50,9 +51,10 @@ static const char **g_allThreadNames;
 static const char **g_allQueueNames;
 static int g_allThreadsCount;
 static _Atomic(int) g_semaphoreCount;
+static bool g_hasThreadStarted = false;
 
 static void
-updateThreadList()
+updateThreadList(void)
 {
     const task_t thisTask = mach_task_self();
     int oldThreadsCount = g_allThreadsCount;
@@ -63,7 +65,11 @@ updateThreadList()
 
     mach_msg_type_number_t allThreadsCount;
     thread_act_array_t threads;
-    task_threads(thisTask, &threads, &allThreadsCount);
+    kern_return_t kr;
+    if ((kr = task_threads(thisTask, &threads, &allThreadsCount)) != KERN_SUCCESS) {
+        SentryCrashLOG_ERROR("task_threads: %s", mach_error_string(kr));
+        return;
+    }
 
     allMachThreads = calloc(allThreadsCount, sizeof(*allMachThreads));
     allPThreads = calloc(allThreadsCount, sizeof(*allPThreads));
@@ -144,6 +150,10 @@ monitorCachedData(__unused void *const userData)
 void
 sentrycrashccd_init(int pollingIntervalInSeconds)
 {
+    if (g_hasThreadStarted == true) {
+        return;
+    }
+    g_hasThreadStarted = true;
     g_pollingIntervalInSeconds = pollingIntervalInSeconds;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -157,7 +167,22 @@ sentrycrashccd_init(int pollingIntervalInSeconds)
 }
 
 void
-sentrycrashccd_freeze()
+sentrycrashccd_close(void)
+{
+    if (g_hasThreadStarted == true) {
+        g_hasThreadStarted = false;
+        pthread_cancel(g_cacheThread);
+    }
+}
+
+bool
+sentrycrashccd_hasThreadStarted(void)
+{
+    return g_hasThreadStarted;
+}
+
+void
+sentrycrashccd_freeze(void)
 {
     if (g_semaphoreCount++ <= 0) {
         // Sleep just in case the cached data thread is in the middle of an
@@ -167,7 +192,7 @@ sentrycrashccd_freeze()
 }
 
 void
-sentrycrashccd_unfreeze()
+sentrycrashccd_unfreeze(void)
 {
     if (--g_semaphoreCount < 0) {
         // Handle extra calls to unfreeze somewhat gracefully.

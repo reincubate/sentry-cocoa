@@ -6,6 +6,7 @@
 
 #    include "SentryThreadHandle.hpp"
 
+#    include <cstdint>
 #    include <memory>
 #    include <string>
 
@@ -18,8 +19,8 @@ namespace profiling {
     };
 
     /**
-     * Caches thread metadata (name, priority, etc.) for reuse while profiling, since querying that
-     * metadata from the thread every time can be expensive.
+     * Caches thread and queue metadata (name, priority, etc.) for reuse while profiling,
+     * since querying that metadata every time can be expensive.
      *
      * @note This class is not thread-safe.
      */
@@ -43,7 +44,7 @@ namespace profiling {
             ThreadHandle::NativeHandle handle;
             ThreadMetadata metadata;
         };
-        std::vector<const ThreadHandleMetadataPair> cache_;
+        std::vector<const ThreadHandleMetadataPair> threadMetadataCache_;
     };
 
 } // namespace profiling

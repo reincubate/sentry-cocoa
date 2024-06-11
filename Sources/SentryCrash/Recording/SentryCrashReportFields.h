@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashReportFields.h
 //
@@ -45,11 +46,9 @@
 #pragma mark - Exception Types -
 
 #define SentryCrashExcType_CPPException "cpp_exception"
-#define SentryCrashExcType_Deadlock "deadlock"
 #define SentryCrashExcType_Mach "mach"
 #define SentryCrashExcType_NSException "nsexception"
 #define SentryCrashExcType_Signal "signal"
-#define SentryCrashExcType_User "user"
 
 #pragma mark - Common -
 
@@ -134,7 +133,6 @@
 #define SentryCrashField_Reason "reason"
 #define SentryCrashField_Signal "signal"
 #define SentryCrashField_Subcode "subcode"
-#define SentryCrashField_UserReported "user_reported"
 
 #pragma mark - Process State -
 
@@ -207,10 +205,8 @@
 #define SentryCrashField_ProcessID "process_id"
 #define SentryCrashField_ProcessName "process_name"
 #define SentryCrashField_Size "size"
-#define SentryCrashField_Storage "storage"
 #define SentryCrashField_SystemName "system_name"
 #define SentryCrashField_SystemVersion "system_version"
-#define SentryCrashField_TimeZone "time_zone"
 #define SentryCrashField_BuildType "build_type"
 
 #endif

@@ -7,6 +7,7 @@
 #    include "SentryStackBounds.hpp"
 
 #    include <chrono>
+#    include <cstdint>
 #    include <mach/mach.h>
 #    include <memory>
 #    include <pthread.h>

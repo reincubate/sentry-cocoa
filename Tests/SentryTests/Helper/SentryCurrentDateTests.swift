@@ -1,12 +1,17 @@
 @testable import Sentry
+import SentryTestUtils
 import XCTest
 
 class SentryCurrentDateTests: XCTestCase {
 
+    override func tearDown() {
+        super.tearDown()
+        clearTestState()
+    }
+    
     func testSetNoCurrentDateProvider() {
-        CurrentDate.setCurrentDateProvider(DefaultCurrentDateProvider.sharedInstance())
         let firstDate = Date()
-        let secondDate = CurrentDate.date()
+        let secondDate = SentryDependencyContainer.sharedInstance().dateProvider.date()
         let thirdDate = Date()
 
         XCTAssertGreaterThanOrEqual(secondDate, firstDate)
@@ -14,9 +19,8 @@ class SentryCurrentDateTests: XCTestCase {
     }
 
     func testDefaultCurrentDateProvider() {
-        CurrentDate.setCurrentDateProvider(DefaultCurrentDateProvider.sharedInstance())
         let firstDate = Date()
-        let secondDate = CurrentDate.date()
+        let secondDate = SentryDependencyContainer.sharedInstance().dateProvider.date()
         let thirdDate = Date()
 
         XCTAssertGreaterThanOrEqual(secondDate, firstDate)
@@ -24,10 +28,10 @@ class SentryCurrentDateTests: XCTestCase {
     }
 
     func testTestCurrentDateProvider() {
-        CurrentDate.setCurrentDateProvider(TestCurrentDateProvider())
+        SentryDependencyContainer.sharedInstance().dateProvider = TestCurrentDateProvider()
         let expected = Date(timeIntervalSinceReferenceDate: 0)
 
-        let actual = CurrentDate.date()
+        let actual = SentryDependencyContainer.sharedInstance().dateProvider.date()
 
         XCTAssertEqual(expected, actual)
     }

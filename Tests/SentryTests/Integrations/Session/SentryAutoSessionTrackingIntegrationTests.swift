@@ -1,3 +1,4 @@
+import SentryTestUtils
 import XCTest
 
 class SentryAutoSessionTrackingIntegrationTests: XCTestCase {
@@ -9,14 +10,13 @@ class SentryAutoSessionTrackingIntegrationTests: XCTestCase {
         XCTAssertNotNil(Dynamic(sut).tracker.asAnyObject)
     }
     
-    func test_AutoSessionTrackingDisabled_RemovesEnabledIntegration() {
+    func test_AutoSessionTracking_Disabled() {
         let options = Options()
         options.enableAutoSessionTracking = false
         
         let sut = SentryAutoSessionTrackingIntegration()
-        sut.install(with: options)
+        let result = sut.install(with: options)
         
-        let expexted = Options.defaultIntegrations().filter { !$0.contains("AutoSession") }
-        assertArrayEquals(expected: expexted, actual: Array(options.enabledIntegrations))
+        XCTAssertFalse(result)
     }
 }

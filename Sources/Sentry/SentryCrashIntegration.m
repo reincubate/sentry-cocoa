@@ -5,19 +5,19 @@
 #import "SentryEvent.h"
 #import "SentryHub.h"
 #import "SentryInAppLogic.h"
-#import "SentryOutOfMemoryLogic.h"
 #import "SentrySDK+Private.h"
 #import "SentryScope+Private.h"
 #import "SentrySessionCrashedHandler.h"
+#import "SentryWatchdogTerminationLogic.h"
 #import <SentryAppStateManager.h>
 #import <SentryClient+Private.h>
 #import <SentryCrashScopeObserver.h>
-#import <SentryDefaultCurrentDateProvider.h>
 #import <SentryDependencyContainer.h>
 #import <SentrySDK+Private.h>
 #import <SentrySysctl.h>
 
 #if SENTRY_HAS_UIKIT
+#    import "SentryUIApplication.h"
 #    import <UIKit/UIKit.h>
 #endif
 
@@ -60,46 +60,45 @@ SentryCrashIntegration ()
     return self;
 }
 
-/**
- * Wrapper for `SentryCrash.sharedInstance.systemInfo`, to cash the result.
- *
- * @return NSDictionary system info.
- */
-+ (NSDictionary *)systemInfo
+- (BOOL)installWithOptions:(nonnull SentryOptions *)options
 {
-    static NSDictionary *sharedInfo = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ sharedInfo = SentryCrash.sharedInstance.systemInfo; });
-    return sharedInfo;
-}
+    if (![super installWithOptions:options]) {
+        return NO;
+    }
 
-- (void)installWithOptions:(nonnull SentryOptions *)options
-{
     self.options = options;
 
+#if SENTRY_HAS_UIKIT
     SentryAppStateManager *appStateManager =
         [SentryDependencyContainer sharedInstance].appStateManager;
-    SentryOutOfMemoryLogic *logic =
-        [[SentryOutOfMemoryLogic alloc] initWithOptions:options
-                                           crashAdapter:self.crashAdapter
-                                        appStateManager:appStateManager];
+    SentryWatchdogTerminationLogic *logic =
+        [[SentryWatchdogTerminationLogic alloc] initWithOptions:options
+                                                   crashAdapter:self.crashAdapter
+                                                appStateManager:appStateManager];
     self.crashedSessionHandler =
         [[SentrySessionCrashedHandler alloc] initWithCrashWrapper:self.crashAdapter
-                                                 outOfMemoryLogic:logic];
+                                         watchdogTerminationLogic:logic];
+#else
+    self.crashedSessionHandler =
+        [[SentrySessionCrashedHandler alloc] initWithCrashWrapper:self.crashAdapter];
+#endif // SENTRY_HAS_UIKIT
 
     self.scopeObserver =
         [[SentryCrashScopeObserver alloc] initWithMaxBreadcrumbs:options.maxBreadcrumbs];
 
-    [self startCrashHandler];
-
-    if (options.stitchAsyncCode) {
-        [self.crashAdapter installAsyncHooks];
-    }
+    [self startCrashHandler:options.cacheDirectoryPath];
 
     [self configureScope];
+
+    return YES;
 }
 
-- (void)startCrashHandler
+- (SentryIntegrationOption)integrationOptions
+{
+    return kIntegrationOptionEnableCrashHandler;
+}
+
+- (void)startCrashHandler:(NSString *)cacheDirectory
 {
     void (^block)(void) = ^{
         BOOL canSendReports = NO;
@@ -108,12 +107,15 @@ SentryCrashIntegration ()
                 [[SentryInAppLogic alloc] initWithInAppIncludes:self.options.inAppIncludes
                                                   inAppExcludes:self.options.inAppExcludes];
 
-            installation = [[SentryCrashInstallationReporter alloc] initWithInAppLogic:inAppLogic];
+            installation = [[SentryCrashInstallationReporter alloc]
+                initWithInAppLogic:inAppLogic
+                      crashWrapper:self.crashAdapter
+                     dispatchQueue:self.dispatchQueueWrapper];
 
             canSendReports = YES;
         }
 
-        [installation install];
+        [installation install:cacheDirectory];
 
         // We need to send the crashed event together with the crashed session in the same envelope
         // to have proper statistics in release health. To achieve this we need both synchronously
@@ -139,140 +141,167 @@ SentryCrashIntegration ()
         // just not call sendAllReports as it doesn't make sense to call it twice as described
         // above.
         if (canSendReports) {
-            [installation sendAllReports];
+            [SentryCrashIntegration sendAllSentryCrashReports];
         }
     };
     [self.dispatchQueueWrapper dispatchOnce:&installationToken block:block];
 }
 
+/**
+ * Internal, only needed for testing.
+ */
++ (void)sendAllSentryCrashReports
+{
+    [installation sendAllReportsWithCompletion:NULL];
+}
+
 - (void)uninstall
 {
     if (nil != installation) {
-        // Its not really possible to uninstall SentryCrash. Best we can do is to deactivate
-        // all the monitors and clear the `onCrash` callback installed on the global handler.
-        SentryCrash *handler = [SentryCrash sharedInstance];
-        @synchronized(handler) {
-            [handler setMonitoring:SentryCrashMonitorTypeNone];
-            handler.onCrash = NULL;
-        }
+        [installation uninstall];
         installationToken = 0;
     }
-    [self.crashAdapter deactivateAsyncHooks];
 
-    [NSNotificationCenter.defaultCenter removeObserver:self];
+    [NSNotificationCenter.defaultCenter removeObserver:self
+                                                  name:NSCurrentLocaleDidChangeNotification
+                                                object:nil];
 }
 
 - (void)configureScope
 {
     // We need to make sure to set always the scope to KSCrash so we have it in
     // case of a crash
-    NSString *integrationName = NSStringFromClass(SentryCrashIntegration.class);
-    if (nil != [SentrySDK.currentHub getIntegration:integrationName]) {
-        [SentrySDK.currentHub configureScope:^(SentryScope *_Nonnull outerScope) {
-            // OS
-            NSMutableDictionary *osData = [NSMutableDictionary new];
+    [SentrySDK.currentHub configureScope:^(SentryScope *_Nonnull outerScope) {
+        [SentryCrashIntegration enrichScope:outerScope crashWrapper:self.crashAdapter];
 
-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
-            [osData setValue:@"macOS" forKey:@"name"];
-#elif TARGET_OS_IOS
-            [osData setValue:@"iOS" forKey:@"name"];
-#elif TARGET_OS_TV
-            [osData setValue:@"tvOS" forKey:@"name"];
-#elif TARGET_OS_WATCH
-            [osData setValue:@"watchOS" forKey:@"name"];
-#endif
+        NSMutableDictionary<NSString *, id> *userInfo =
+            [[NSMutableDictionary alloc] initWithDictionary:[outerScope serialize]];
+        // SentryCrashReportConverter.convertReportToEvent needs the release name and
+        // the dist of the SentryOptions in the UserInfo. When SentryCrash records a
+        // crash it writes the UserInfo into SentryCrashField_User of the report.
+        // SentryCrashReportConverter.initWithReport loads the contents of
+        // SentryCrashField_User into self.userContext and convertReportToEvent can map
+        // the release name and dist to the SentryEvent. Fixes GH-581
+        userInfo[@"release"] = self.options.releaseName;
+        userInfo[@"dist"] = self.options.dist;
 
-            // For MacCatalyst the UIDevice returns the current version of MacCatalyst and not the
-            // macOSVersion. Therefore we have to use NSProcessInfo.
-#if SENTRY_HAS_UIDEVICE && !TARGET_OS_MACCATALYST
-            [osData setValue:[UIDevice currentDevice].systemVersion forKey:@"version"];
-#else
-            NSOperatingSystemVersion version = [NSProcessInfo processInfo].operatingSystemVersion;
-            NSString *systemVersion =
-                [NSString stringWithFormat:@"%d.%d.%d", (int)version.majorVersion,
-                          (int)version.minorVersion, (int)version.patchVersion];
-            [osData setValue:systemVersion forKey:@"version"];
+        [SentryDependencyContainer.sharedInstance.crashReporter setUserInfo:userInfo];
 
-#endif
-
-            NSDictionary *systemInfo = [SentryCrashIntegration systemInfo];
-            [osData setValue:systemInfo[@"osVersion"] forKey:@"build"];
-            [osData setValue:systemInfo[@"kernelVersion"] forKey:@"kernel_version"];
-            [osData setValue:systemInfo[@"isJailbroken"] forKey:@"rooted"];
-
-            [outerScope setContextValue:osData forKey:@"os"];
-
-            // DEVICE
-
-            NSMutableDictionary *deviceData = [NSMutableDictionary new];
-
-#if TARGET_OS_SIMULATOR
-            [deviceData setValue:@(YES) forKey:@"simulator"];
-#endif
-
-            NSString *family = [[systemInfo[@"systemName"]
-                componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
-                firstObject];
-
-#if TARGET_OS_MACCATALYST
-            // This would be iOS. Set it to macOS instead.
-            family = @"macOS";
-#endif
-
-            [deviceData setValue:family forKey:@"family"];
-            [deviceData setValue:systemInfo[@"cpuArchitecture"] forKey:@"arch"];
-            [deviceData setValue:systemInfo[@"machine"] forKey:@"model"];
-            [deviceData setValue:systemInfo[@"model"] forKey:@"model_id"];
-            [deviceData setValue:systemInfo[@"freeMemory"] forKey:SentryDeviceContextFreeMemoryKey];
-            [deviceData setValue:systemInfo[@"usableMemory"] forKey:@"usable_memory"];
-            [deviceData setValue:systemInfo[@"memorySize"] forKey:@"memory_size"];
-            [deviceData setValue:systemInfo[@"storageSize"] forKey:@"storage_size"];
-            [deviceData setValue:systemInfo[@"bootTime"] forKey:@"boot_time"];
-            [deviceData setValue:systemInfo[@"timezone"] forKey:@"timezone"];
-
-            NSString *locale =
-                [[NSLocale autoupdatingCurrentLocale] objectForKey:NSLocaleIdentifier];
-            [deviceData setValue:locale forKey:LOCALE_KEY];
-
-            [outerScope setContextValue:deviceData forKey:DEVICE_KEY];
-
-            // APP
-            NSMutableDictionary *appData = [NSMutableDictionary new];
-            NSDictionary *infoDict = [[NSBundle mainBundle] infoDictionary];
-
-            [appData setValue:infoDict[@"CFBundleIdentifier"] forKey:@"app_identifier"];
-            [appData setValue:infoDict[@"CFBundleName"] forKey:@"app_name"];
-            [appData setValue:infoDict[@"CFBundleVersion"] forKey:@"app_build"];
-            [appData setValue:infoDict[@"CFBundleShortVersionString"] forKey:@"app_version"];
-
-            [appData setValue:systemInfo[@"appStartTime"] forKey:@"app_start_time"];
-            [appData setValue:systemInfo[@"deviceAppHash"] forKey:@"device_app_hash"];
-            [appData setValue:systemInfo[@"appID"] forKey:@"app_id"];
-            [appData setValue:systemInfo[@"buildType"] forKey:@"build_type"];
-
-            [outerScope setContextValue:appData forKey:@"app"];
-
-            NSMutableDictionary<NSString *, id> *userInfo =
-                [[NSMutableDictionary alloc] initWithDictionary:[outerScope serialize]];
-            // SentryCrashReportConverter.convertReportToEvent needs the release name and
-            // the dist of the SentryOptions in the UserInfo. When SentryCrash records a
-            // crash it writes the UserInfo into SentryCrashField_User of the report.
-            // SentryCrashReportConverter.initWithReport loads the contents of
-            // SentryCrashField_User into self.userContext and convertReportToEvent can map
-            // the release name and dist to the SentryEvent. Fixes GH-581
-            userInfo[@"release"] = self.options.releaseName;
-            userInfo[@"dist"] = self.options.dist;
-
-            [SentryCrash.sharedInstance setUserInfo:userInfo];
-
-            [outerScope addObserver:self.scopeObserver];
-        }];
-    }
+        [outerScope addObserver:self.scopeObserver];
+    }];
 
     [NSNotificationCenter.defaultCenter addObserver:self
                                            selector:@selector(currentLocaleDidChange)
                                                name:NSCurrentLocaleDidChangeNotification
                                              object:nil];
+}
+
++ (void)enrichScope:(SentryScope *)scope crashWrapper:(SentryCrashWrapper *)crashWrapper
+{
+    // OS
+    NSMutableDictionary *osData = [NSMutableDictionary new];
+
+#if SENTRY_TARGET_MACOS
+    [osData setValue:@"macOS" forKey:@"name"];
+#elif TARGET_OS_IOS
+    [osData setValue:@"iOS" forKey:@"name"];
+#elif TARGET_OS_TV
+    [osData setValue:@"tvOS" forKey:@"name"];
+#elif TARGET_OS_WATCH
+    [osData setValue:@"watchOS" forKey:@"name"];
+#elif TARGET_OS_VISION
+    [osData setValue:@"visionOS" forKey:@"name"];
+#endif
+
+    // For MacCatalyst the UIDevice returns the current version of MacCatalyst and not the
+    // macOSVersion. Therefore we have to use NSProcessInfo.
+#if SENTRY_HAS_UIKIT && !TARGET_OS_MACCATALYST
+    [osData setValue:[UIDevice currentDevice].systemVersion forKey:@"version"];
+#else
+    NSOperatingSystemVersion version = [NSProcessInfo processInfo].operatingSystemVersion;
+    NSString *systemVersion = [NSString stringWithFormat:@"%d.%d.%d", (int)version.majorVersion,
+                                        (int)version.minorVersion, (int)version.patchVersion];
+    [osData setValue:systemVersion forKey:@"version"];
+
+#endif
+
+    NSDictionary *systemInfo = [crashWrapper systemInfo];
+
+    // SystemInfo should only be nil when SentryCrash has not been installed
+    if (systemInfo != nil && systemInfo.count != 0) {
+        [osData setValue:systemInfo[@"osVersion"] forKey:@"build"];
+        [osData setValue:systemInfo[@"kernelVersion"] forKey:@"kernel_version"];
+        [osData setValue:systemInfo[@"isJailbroken"] forKey:@"rooted"];
+    }
+
+    [scope setContextValue:osData forKey:@"os"];
+
+    // SystemInfo should only be nil when SentryCrash has not been installed
+    if (systemInfo == nil || systemInfo.count == 0) {
+        return;
+    }
+
+    // DEVICE
+
+    NSMutableDictionary *deviceData = [NSMutableDictionary new];
+
+#if TARGET_OS_SIMULATOR
+    [deviceData setValue:@(YES) forKey:@"simulator"];
+#else
+    [deviceData setValue:@(NO) forKey:@"simulator"];
+#endif
+
+    NSString *family = [[systemInfo[@"systemName"]
+        componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] firstObject];
+
+#if TARGET_OS_MACCATALYST
+    // This would be iOS. Set it to macOS instead.
+    family = @"macOS";
+#endif
+
+    [deviceData setValue:family forKey:@"family"];
+    [deviceData setValue:systemInfo[@"cpuArchitecture"] forKey:@"arch"];
+    [deviceData setValue:systemInfo[@"machine"] forKey:@"model"];
+    [deviceData setValue:systemInfo[@"model"] forKey:@"model_id"];
+    [deviceData setValue:systemInfo[@"freeMemorySize"] forKey:SentryDeviceContextFreeMemoryKey];
+    [deviceData setValue:systemInfo[@"usableMemorySize"] forKey:@"usable_memory"];
+    [deviceData setValue:systemInfo[@"memorySize"] forKey:@"memory_size"];
+    [deviceData setValue:systemInfo[@"bootTime"] forKey:@"boot_time"];
+
+    NSString *locale = [[NSLocale autoupdatingCurrentLocale] objectForKey:NSLocaleIdentifier];
+    [deviceData setValue:locale forKey:LOCALE_KEY];
+
+// The UIWindowScene is unavailable on visionOS
+#if SENTRY_HAS_UIKIT && !TARGET_OS_VISION
+
+    NSArray<UIWindow *> *appWindows = SentryDependencyContainer.sharedInstance.application.windows;
+    if ([appWindows count] > 0) {
+        UIScreen *appScreen = appWindows.firstObject.screen;
+        if (appScreen != nil) {
+            [deviceData setValue:@(appScreen.bounds.size.height) forKey:@"screen_height_pixels"];
+            [deviceData setValue:@(appScreen.bounds.size.width) forKey:@"screen_width_pixels"];
+        }
+    }
+
+#endif
+
+    [scope setContextValue:deviceData forKey:DEVICE_KEY];
+
+    // APP
+    NSMutableDictionary *appData = [NSMutableDictionary new];
+    NSDictionary *infoDict = [[NSBundle mainBundle] infoDictionary];
+
+    [appData setValue:infoDict[@"CFBundleIdentifier"] forKey:@"app_identifier"];
+    [appData setValue:infoDict[@"CFBundleName"] forKey:@"app_name"];
+    [appData setValue:infoDict[@"CFBundleVersion"] forKey:@"app_build"];
+    [appData setValue:infoDict[@"CFBundleShortVersionString"] forKey:@"app_version"];
+
+    [appData setValue:systemInfo[@"appStartTime"] forKey:@"app_start_time"];
+    [appData setValue:systemInfo[@"deviceAppHash"] forKey:@"device_app_hash"];
+    [appData setValue:systemInfo[@"appID"] forKey:@"app_id"];
+    [appData setValue:systemInfo[@"buildType"] forKey:@"build_type"];
+
+    [scope setContextValue:appData forKey:@"app"];
 }
 
 - (void)currentLocaleDidChange

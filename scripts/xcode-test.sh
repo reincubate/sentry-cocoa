@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -euxo pipefail
 
 # This is a helper script for GitHub Actions Matrix.
 # If we would specify the destinations in the GitHub Actions
@@ -10,44 +10,112 @@ set -euo pipefail
 
 PLATFORM="${1}"
 OS=${2:-latest}
-DESTINATION=""
+REF_NAME="${3-HEAD}"
+IS_LOCAL_BUILD="${4:-ci}"
+COMMAND="${5:-test}"
+DEVICE=${6:-iPhone 14}
+CONFIGURATION_OVERRIDE="${7}"
+DERIVED_DATA_PATH="${8:-}"
 
 case $PLATFORM in
 
-    "macOS")
-        DESTINATION="platform=macOS"
-        ;;
+"macOS")
+    DESTINATION="platform=macOS"
+    ;;
 
-    "Catalyst")
-        DESTINATION="platform=macOS,variant=Mac Catalyst"
-        ;;
+"Catalyst")
+    DESTINATION="platform=macOS,variant=Mac Catalyst"
+    ;;
 
-    "iOS")
-        DESTINATION="platform=iOS Simulator,OS=$OS,name=iPhone 8"
-        ;;
+"iOS")
+    DESTINATION="platform=iOS Simulator,OS=$OS,name=$DEVICE"
+    ;;
 
-    "tvOS")
-        DESTINATION="platform=tvOS Simulator,OS=$OS,name=Apple TV 4K"
-        ;;
-    
-    *)
-        echo "Xcode Test: Can't find destination for platform '$PLATFORM'"; 
-        exit 1;
-        ;;
+"tvOS")
+    DESTINATION="platform=tvOS Simulator,OS=$OS,name=Apple TV"
+    ;;
+
+*)
+    echo "Xcode Test: Can't find destination for platform '$PLATFORM'"
+    exit 1
+    ;;
 esac
 
-# The following tests fail on iOS 12.4. We ignore them for now and are going to fix them later.
-if [ $PLATFORM == "iOS" -a $OS == "12.4" ]; then
-    echo "Skipping tests for iOS 12.4."
+if [ -n $CONFIGURATION_OVERRIDE ]; then
+    CONFIGURATION=$CONFIGURATION_OVERRIDE
+else
+    case $REF_NAME in
+    "main")
+        CONFIGURATION="TestCI"
+        ;;
 
-    env NSUnbufferedIO=YES xcodebuild -workspace Sentry.xcworkspace -scheme Sentry -configuration Test \
-        GCC_GENERATE_TEST_COVERAGE_FILES=YES GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=YES -destination "$DESTINATION" \
-        -skip-testing:"SentryTests/SentryNetworkTrackerIntegrationTests/testGetRequest_SpanCreatedAndTraceHeaderAdded" \
-        -skip-testing:"SentryTests/SentrySDKTests/testMemoryFootprintOfAddingBreadcrumbs" \
-        -skip-testing:"SentryTests/SentrySDKTests/testMemoryFootprintOfTransactions" \
-        test | xcpretty -t && exit ${PIPESTATUS[0]}
-else 
-    env NSUnbufferedIO=YES xcodebuild -workspace Sentry.xcworkspace -scheme Sentry -configuration Test \
-        GCC_GENERATE_TEST_COVERAGE_FILES=YES GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=YES -destination "$DESTINATION" \
-        test | xcpretty -t && exit ${PIPESTATUS[0]}
+    *)
+        CONFIGURATION="Test"
+        ;;
+    esac
+fi
+
+case $IS_LOCAL_BUILD in
+"ci")
+    RUBY_ENV_ARGS=""
+    ;;
+*)
+    RUBY_ENV_ARGS="rbenv exec bundle exec"
+    ;;
+esac
+
+case $COMMAND in
+"build")
+    RUN_BUILD=true
+    RUN_BUILD_FOR_TESTING=false
+    RUN_TEST_WITHOUT_BUILDING=false
+    ;;
+"build-for-testing")
+    RUN_BUILD=false
+    RUN_BUILD_FOR_TESTING=true
+    RUN_TEST_WITHOUT_BUILDING=false
+    ;;
+"test-without-building")
+    RUN_BUILD=false
+    RUN_BUILD_FOR_TESTING=false
+    RUN_TEST_WITHOUT_BUILDING=true
+    ;;
+*)
+    RUN_BUILD=false
+    RUN_BUILD_FOR_TESTING=true
+    RUN_TEST_WITHOUT_BUILDING=true
+    ;;
+esac
+
+if [ $RUN_BUILD == true ]; then
+    env NSUnbufferedIO=YES xcodebuild \
+        -workspace Sentry.xcworkspace \
+        -scheme Sentry \
+        -configuration $CONFIGURATION \
+        -destination "$DESTINATION" \
+        -derivedDataPath $DERIVED_DATA_PATH \
+        -quiet \
+        build
+fi
+
+if [ $RUN_BUILD_FOR_TESTING == true ]; then
+    env NSUnbufferedIO=YES xcodebuild \
+        -workspace Sentry.xcworkspace \
+        -scheme Sentry \
+        -configuration $CONFIGURATION \
+        -destination "$DESTINATION" -quiet \
+        build-for-testing
+fi
+
+if [ $RUN_TEST_WITHOUT_BUILDING == true ]; then
+    env NSUnbufferedIO=YES xcodebuild \
+        -workspace Sentry.xcworkspace \
+        -scheme Sentry \
+        -configuration $CONFIGURATION \
+        -destination "$DESTINATION" \
+        test-without-building |
+        tee raw-test-output.log |
+        $RUBY_ENV_ARGS xcpretty -t &&
+        slather coverage --configuration $CONFIGURATION &&
+        exit ${PIPESTATUS[0]}
 fi

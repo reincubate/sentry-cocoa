@@ -1,4 +1,5 @@
 import ObjectiveC
+import SentryTestUtils
 import XCTest
 
 #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
@@ -16,7 +17,7 @@ class SentrySubClassFinderTests: XCTestCase {
         let testClassesNames = [NSStringFromClass(FirstViewController.self),
                                 NSStringFromClass(SecondViewController.self),
                                 NSStringFromClass(ViewControllerNumberThree.self),
-                                NSStringFromClass(VCWrongNaming.self),
+                                NSStringFromClass(VCAnyNaming.self),
                                 NSStringFromClass(FakeViewController.self)]
         init() {
             if let name = class_getImageName(FirstViewController.self) {
@@ -39,30 +40,25 @@ class SentrySubClassFinderTests: XCTestCase {
     }
     
     func testActOnSubclassesOfViewController() {
-        testActOnSubclassesOfViewController(expected: [FirstViewController.self, SecondViewController.self, ViewControllerNumberThree.self])
+        assertActOnSubclassesOfViewController(expected: [FirstViewController.self, SecondViewController.self, ViewControllerNumberThree.self, VCAnyNaming.self])
     }
     
     func testActOnSubclassesOfViewController_NoViewController() {
         fixture.runtimeWrapper.classesNames = { _ in [] }
-        testActOnSubclassesOfViewController(expected: [])
+        assertActOnSubclassesOfViewController(expected: [])
     }
     
     func testActOnSubclassesOfViewController_IgnoreFakeViewController() {
         fixture.runtimeWrapper.classesNames = { _ in [NSStringFromClass(FakeViewController.self)] }
-        testActOnSubclassesOfViewController(expected: [])
+        assertActOnSubclassesOfViewController(expected: [])
     }
-    
-    func testActOnSubclassesOfViewController_IgnoreWrongNaming() {
-        fixture.runtimeWrapper.classesNames = { _ in [NSStringFromClass(VCWrongNaming.self)] }
-        testActOnSubclassesOfViewController(expected: [])
-    }
-    
+     
     func testActOnSubclassesOfViewController_WrongImage_NoViewController() {
         fixture.runtimeWrapper.classesNames = nil
-        testActOnSubclassesOfViewController(expected: [], imageName: "OtherImage")
+        assertActOnSubclassesOfViewController(expected: [], imageName: "OtherImage")
     }
   
-    func testGettingSublcasses_DoesNotCallInitializer() {
+    func testGettingSubclasses_DoesNotCallInitializer() {
         let sut = SentrySubClassFinder(dispatchQueue: TestSentryDispatchQueueWrapper(), objcRuntimeWrapper: fixture.runtimeWrapper)
         
         var actual: [AnyClass] = []
@@ -73,11 +69,11 @@ class SentrySubClassFinderTests: XCTestCase {
         XCTAssertFalse(SentryInitializeForGettingSubclassesCalled.wasCalled())
     }
     
-    private func testActOnSubclassesOfViewController(expected: [AnyClass]) {
-        testActOnSubclassesOfViewController(expected: expected, imageName: fixture.imageName)
+    private func assertActOnSubclassesOfViewController(expected: [AnyClass]) {
+        assertActOnSubclassesOfViewController(expected: expected, imageName: fixture.imageName)
     }
     
-    private func testActOnSubclassesOfViewController(expected: [AnyClass], imageName: String) {
+    private func assertActOnSubclassesOfViewController(expected: [AnyClass], imageName: String) {
         let expect = expectation(description: "")
         
         if expected.isEmpty {
@@ -108,6 +104,6 @@ class SentrySubClassFinderTests: XCTestCase {
 class FirstViewController: UIViewController {}
 class SecondViewController: UIViewController {}
 class ViewControllerNumberThree: UIViewController {}
-class VCWrongNaming: UIViewController {}
+class VCAnyNaming: UIViewController {}
 class FakeViewController {}
 #endif

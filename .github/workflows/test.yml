@@ -2,190 +2,303 @@ name: Test
 on:
   push:
     branches:
-      - master
+      - main
       - release/**
 
   pull_request:
     paths:
-      - 'Sources/**'
-      - 'Tests/**'
-      - 'test-server/**'
-      - 'Samples/**'
-      - '.github/workflows/**'
+      - "Sources/**"
+      - "Tests/**"
+      - "SentryTestUtils/**"
+      - "test-server/**"
+      - "Samples/**"
+      - ".github/workflows/test.yml"
+      - "fastlane/**"
+      - "scripts/tests-with-thread-sanitizer.sh"
+      - "scripts/ci-select-xcode.sh"
+      - "scripts/xcode-test.sh"
+      - ".codecov.yml"
+      - Sentry.xcodeproj
+
+      # run the workflow any time an Xcode scheme changes for a sample app
+      - "Samples/tvOS-Swift/tvOS-Swift.xcodeproj/xcshareddata/xcschemes/tvOS-Swift.xcscheme"
+      - "Samples/iOS-Swift/iOS-Swift.xcodeproj/xcshareddata/xcschemes/iOS13-Swift.xcscheme"
+      - "Samples/iOS-Swift/iOS-Swift.xcodeproj/xcshareddata/xcschemes/iOS-SwiftUITests.xcscheme"
+      - "Samples/iOS-Swift/iOS-Swift.xcodeproj/xcshareddata/xcschemes/iOS-Swift.xcscheme"
+      - "Samples/macOS-Swift/macOS-Swift.xcodeproj/xcshareddata/xcschemes/macOS-Swift.xcscheme"
+      - "Samples/iOS-ObjectiveC/iOS-ObjectiveC.xcodeproj/xcshareddata/xcschemes/iOS-ObjectiveC.xcscheme"
+
+# https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
+  build-test-server:
+    name: Build test server
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache for Test Server
+        id: cache_test_server
+        uses: actions/cache@v4
+        with:
+          path: ./test-server/.build
+          key: test-server-${{ hashFiles('./test-server') }}
+          restore-keys: |
+            test-server-${{ hashFiles('./test-server') }}
+            test-server-
+
+      - name: Build Test Server
+        if: steps.cache_test_server.outputs.cache-hit != 'true'
+        working-directory: test-server
+        run: >-
+          swift build -c release 2>&1 | tee test-server-build.log
+
+      - name: Copy exec
+        working-directory: test-server
+        run: cp $(swift build --show-bin-path -c release)/Run test-server-exec
+
+      - name: Archiving DerivedData
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-server
+          path: |
+            ./test-server/test-server-exec
+
+      - name: Archiving Raw Test Logs
+        uses: actions/upload-artifact@v4
+        if: ${{  failure() || cancelled() }}
+        with:
+          name: test-server-build-log-${{matrix.platform}}-xcode-${{matrix.xcode}}-os-${{matrix.test-destination-os}}
+          path: |
+            raw-test-output.log
+
   unit-tests:
     name: Unit ${{matrix.platform}} - Xcode ${{matrix.xcode}} - OS ${{matrix.test-destination-os}}
     runs-on: ${{matrix.runs-on}}
-    strategy:      
+    timeout-minutes: 20
+    needs: build-test-server
+
+    strategy:
       fail-fast: false
       matrix:
-        runs-on: [ macos-11 ]
-        
-        # Can't run tests on watchOS because XCTest is not available  
-        platform: ["macOS", "Catalyst", "iOS", "tvOS"]
-        
-        # We can't use Xcode 10.3 because our tests contain a reference to MacCatalyst,
-        # which is only available since iOS 13 / Xcode 11.
-        xcode: ["13.0", "12.5.1", "11.7"]
-
-        test-destination-os: ["latest"]
-
-        # Test on iOS 12.4
+        # Can't run tests on watchOS because XCTest is not available
         include:
-          - runs-on: macos-10.15
+          # iOS 13.7
+          - runs-on: macos-11
             platform: "iOS"
-            xcode: "11.7"
-            test-destination-os: "12.4"
+            xcode: "13.2.1"
+            test-destination-os: "13.7"
+            device: "iPhone 8"
+
+          # iOS 14
+          - runs-on: macos-11
+            platform: "iOS"
+            xcode: "13.2.1"
+            test-destination-os: "14.5"
+            device: "iPhone 8"
+
+          # iOS 15
+          - runs-on: macos-12
+            platform: "iOS"
+            xcode: "13.4.1"
+            test-destination-os: "latest"
+            device: "iPhone 8"
+
+          # iOS 16
+          - runs-on: macos-13
+            platform: "iOS"
+            xcode: "14.3"
+            test-destination-os: "16.4"
+            device: "iPhone 14"
+
+          # iOS 17
+          - runs-on: macos-14
+            platform: "iOS"
+            xcode: "15.2"
+            test-destination-os: "17.2"
+            device: "iPhone 15"
+
+          # macOS 11
+          - runs-on: macos-11
+            platform: "macOS"
+            xcode: "13.2.1"
+            test-destination-os: "latest"
+
+          # macOS 12
+          - runs-on: macos-12
+            platform: "macOS"
+            xcode: "13.4.1"
+            test-destination-os: "latest"
+
+          # macOS 13
+          - runs-on: macos-13
+            platform: "macOS"
+            xcode: "14.3"
+            test-destination-os: "latest"
+
+          # macOS 14
+          - runs-on: macos-14
+            platform: "macOS"
+            xcode: "15.2"
+            test-destination-os: "latest"
+
+          # Catalyst. We only test the latest version, as
+          # the risk something breaking on Catalyst and not
+          # on an older iOS or macOS version is low.
+          - runs-on: macos-14
+            platform: "Catalyst"
+            xcode: "15.2"
+            test-destination-os: "latest"
+
+          # tvOS 15
+          - runs-on: macos-12
+            platform: "tvOS"
+            xcode: "13.4.1"
+            test-destination-os: "latest"
+
+          # tvOS 16
+          - runs-on: macos-13
+            platform: "tvOS"
+            xcode: "14.3"
+            test-destination-os: "latest"
+
+          # tvOS 17
+          - runs-on: macos-14
+            platform: "tvOS"
+            xcode: "15.2"
+            test-destination-os: "latest"
 
     steps:
-      - uses: actions/checkout@v2
-
-      # As we use swift-tools-version:5.5 the test server only compiles with Xcode 13.
-      # macos-10.15 doesn't have Xcode 13 and macos-11 doesn't have a simulator with
-      # iOS 12. Ideally, we would compile the test-server on macos-11 and use it on
-      # macos-10.15. For now, disable the tests on iOS 12 requiring the test server in
-      # xcode-test.sh
-      - name: Cache for Test Server
-        if: ${{ matrix.runs-on == 'macos-11'}}  
-        uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: ./test-server/.build
-          key: ${{ runner.os }}-spm-${{ hashFiles('./test-server/Package.resolved') }}
+          name: test-server
 
-      - name: Run Test Server in Background
-        if: ${{ matrix.runs-on == 'macos-11'}}  
-        run: | 
-          swift build
-          swift run &
-        working-directory: test-server
+      - name: Print hardware info
+        run: system_profiler SPHardwareDataType
 
-      # Select Xcode after starting server, because the server needs Xcode 13
+      - name: Allow test-server to run
+        run: chmod +x ./test-server-exec
+      - run: ./test-server-exec &
+
+      - name: Check test-server runs
+        run: curl http://localhost:8080/echo-baggage-header
+
       - run: ./scripts/ci-select-xcode.sh ${{matrix.xcode}}
 
-      # Only Xcode 10.3 has an iOS 12.4 simulator. As we have a reference to MacCatalyst in our unit tests
-      # we can't run the tests with Xcode 10.3. Therefore we use a workaround with a symlink pointed out in:
-      # https://github.com/actions/virtual-environments/issues/551#issuecomment-637344435
-      - name: Prepare iOS 12.4 simulator
-        if: ${{ matrix.platform == 'iOS' && matrix.test-destination-os == '12.4'}}  
-        run: |
-          sudo mkdir -p /Library/Developer/CoreSimulator/Profiles/Runtimes
-          sudo ln -s /Applications/Xcode_10.3.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/Library/CoreSimulator/Profiles/Runtimes/iOS.simruntime /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS\ 12.4.simruntime
-          xcrun simctl list runtimes
-          xcrun simctl create custom-test-device "iPhone 8" "com.apple.CoreSimulator.SimRuntime.iOS-12-4"
-          xcrun simctl list devices 12.4
+      - name: Prepare iOS 13.7 simulator
+        if: ${{ matrix.platform == 'iOS' && matrix.test-destination-os == '13.7'}}
+        run: ./scripts/create-simulator.sh 11.7 13.7 13-7
 
-      - name: Running tests
+      - name: Prepare iOS 14.5 simulator
+        if: ${{ matrix.platform == 'iOS' && matrix.test-destination-os == '14.5'}}
+        run: ./scripts/create-simulator.sh 12.5.1 14.5 14-5
+
+      - name: Install Slather
+        run: gem install slather
+
+      # We split building and running tests in two steps so we know how long running the tests takes.
+      - name: Build tests
+        id: build_tests
+        run: ./scripts/xcode-test.sh ${{matrix.platform}} ${{matrix.test-destination-os}} $GITHUB_REF_NAME ci build-for-testing "${{matrix.device}}" TestCI
+
+      - name: Run tests
         # We call a script with the platform so the destination
-        # passed to xcodebuild doesn't ends up in the job name, 
-        # because GitHub Actions don't provide an easy way of 
+        # passed to xcodebuild doesn't end up in the job name,
+        # because GitHub Actions don't provide an easy way of
         # manipulating string in expressions.
-        run: ./scripts/xcode-test.sh ${{matrix.platform}} ${{matrix.test-destination-os}}
+        run: ./scripts/xcode-test.sh ${{matrix.platform}} ${{matrix.test-destination-os}} $GITHUB_REF_NAME ci test-without-building "${{matrix.device}}" TestCI
+
+      - name: Slowest Tests
+        if: ${{ always() }}
+        run: ./scripts/xcode-slowest-tests.sh
 
       - name: Archiving DerivedData Logs
-        uses: actions/upload-artifact@v2
-        if: failure()
+        uses: actions/upload-artifact@v4
+        if: steps.build_tests.outcome == 'failure'
         with:
           name: derived-data-${{matrix.platform}}-xcode-${{matrix.xcode}}-os-${{matrix.test-destination-os}}
           path: |
             /Users/runner/Library/Developer/Xcode/DerivedData/**/Logs/**
 
+      - name: Archiving Raw Test Logs
+        uses: actions/upload-artifact@v4
+        if: ${{  failure() || cancelled() }}
+        with:
+          name: raw-test-output-${{matrix.platform}}-xcode-${{matrix.xcode}}-os-${{matrix.test-destination-os}}
+          path: |
+            raw-test-output.log
+
+      - name: Archiving Crash Logs
+        uses: actions/upload-artifact@v4
+        if: ${{  failure() || cancelled() }}
+        with:
+          name: crash-logs-${{matrix.platform}}-xcode-${{matrix.xcode}}-os-${{matrix.test-destination-os}}
+          path: |
+            ~/Library/Logs/DiagnosticReports/**
+
       # We can upload all coverage reports, because codecov merges them.
       # See https://docs.codecov.io/docs/merging-reports
       # Checkout .codecov.yml to see the config of Codecov
+      # We don't upload codecov for release branches, as we don't want a failing coverage check to block a release.
+      # We don't upload codecov for scheduled runs as CodeCov only accepts a limited amount of uploads per commit.
       - name: Push code coverage to codecov
-        uses: codecov/codecov-action@v1
-        
-        # SentrySystemEventsBreadcrumbsTest only run on Catalyst and iOS
-        # so the coverage report shows a reduced coverage.
-        if: ${{ contains(matrix.platform, 'Mac Catalyst') || contains(matrix.platform, 'iOS') }}  
+        id: codecov_1
+        uses: codecov/codecov-action@4fe8c5f003fae66aa5ebb77cfd3e7bfbbda0b6b0 # pin@v3.1.5
+        if: ${{ contains(matrix.platform, 'iOS') && !contains(github.ref, 'release') && github.event.schedule == '' }}
+        with:
+          # Although public repos should not have to specify a token there seems to be a bug with the Codecov GH action, which can
+          # be solved by specifying the token, see https://github.com/codecov/codecov-action/issues/557#issuecomment-1224970469
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: true
+
+      # Sometimes codecov uploads etc can fail. Retry one time to rule out e.g. intermittent network failures.
+      - name: Push code coverage to codecov
+        id: codecov_2
+        uses: codecov/codecov-action@4fe8c5f003fae66aa5ebb77cfd3e7bfbbda0b6b0 # pin@v3.1.5
+        if: ${{ steps.codecov_1.outcome == 'failure' && contains(matrix.platform, 'iOS') && !contains(github.ref, 'release') && github.event.schedule == '' }}
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          verbose: true
 
   # We don't run all unit tests with Thread Sanitizer enabled because
   # that adds a significant overhead.
   thread-sanitizer:
     name: Unit iOS - Thread Sanitizer
-    runs-on: macos-11 
-    # When there are threading issues the tests sometimes keep hanging
+    runs-on: macos-13
     timeout-minutes: 20
+    needs: [build-test-server]
+    
+    # There are several ways this test can flake. Sometimes threaded tests will just hang and the job will time out, other times waiting on expectations will take much longer than in a non-TSAN run and the test case will fail. We're making this nonfailable and will grep the logs to extract any actual thread sanitizer warnings to push to the PR, and ignore everything else.
+    continue-on-error: true
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Cache for Test Server
-        uses: actions/cache@v2
+      - uses: actions/download-artifact@v4
         with:
-          path: ./test-server/.build
-          key: ${{ runner.os }}-spm-${{ hashFiles('./test-server/Package.resolved') }}
+          name: test-server
 
-      - run: swift build
-        working-directory: test-server
+      - name: Allow test-server to run
+        run: chmod +x ./test-server-exec
 
-      - name: Run Test Server in Background
-        run: swift run &
-        working-directory: test-server
+      - run: ./test-server-exec &
+
+      - name: Check test-server runs
+        run: curl http://localhost:8080/echo-baggage-header
 
       - run: ./scripts/ci-select-xcode.sh
 
       - name: Running tests with ThreadSanitizer
         run: ./scripts/tests-with-thread-sanitizer.sh
-      
+
       - name: Archiving Test Logs
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
+        if: ${{  failure() || cancelled() }}
         with:
+          name: thread-sanitizer
           path: thread-sanitizer.log
-
-
-  ui-tests:
-    name: UI Tests for ${{matrix.target}}
-    runs-on: macos-11
-    strategy:
-      matrix:
-        target: ["ios_swiftui", "ios_objc", "tvos_swift" ]
-
-    steps:
-      - uses: actions/checkout@v2
-      - run: ./scripts/ci-select-xcode.sh 
-
-      # GitHub Actions sometimes fail to launch the UI tests. 
-      # Therefore we retry
-      - name: Run Fastlane
-        run: for i in {1..2}; do fastlane ui_tests_${{matrix.target}} && break ; done
-        shell: sh
-
-  ui-tests-swift-ui:
-    name: UI Tests for SwiftUI on ${{matrix.device}}
-    runs-on: macos-11
-    strategy:
-      fail-fast: false
-      matrix:  
-        include:
-          - xcode: "13.2.1"
-            device: "iPhone 8 (15.2)"
-
-          - xcode: "12.5.1"
-            device: "iPhone 8 (14.5)"
-
-        # Our SwiftUI requires iOS 14 or higher
-            
-    steps:
-      - uses: actions/checkout@v2
-      - run: ./scripts/ci-select-xcode.sh ${{matrix.xcode}}
-
-      # GitHub Actions sometimes fail to launch the UI tests. Therefore we retry
-      - name: Run Fastlane
-        run: for i in {1..2}; do fastlane ui_tests_ios_swift device:"${{matrix.device}}" && break ; done
-        shell: sh
-
-  # macos-11 doesn't have a simulator for iOS 12
-  ui-tests-swift-ui-ios-12:
-    name: UI Tests for iOS 12
-    runs-on: macos-10.15
-
-    steps:
-      - uses: actions/checkout@v2
-
-      # GitHub Actions sometimes fail to launch the UI tests. Therefore we retry
-      - name: Run Fastlane
-        run: for i in {1..2}; do fastlane ui_tests_ios_swift device:"$iPhone 8 (12.4)" && break ; done
-        shell: sh
-

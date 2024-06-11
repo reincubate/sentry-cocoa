@@ -1,4 +1,5 @@
 @testable import Sentry
+import SentryTestUtils
 import XCTest
 
 class SentryRetryAfterHeaderParserTests: XCTestCase {
@@ -14,8 +15,13 @@ class SentryRetryAfterHeaderParserTests: XCTestCase {
     override func setUp() {
         super.setUp()
         currentDateProvider = TestCurrentDateProvider()
-        CurrentDate.setCurrentDateProvider(currentDateProvider)
+        SentryDependencyContainer.sharedInstance().dateProvider = currentDateProvider
         sut = RetryAfterHeaderParser(httpDateParser: HttpDateParser())
+    }
+    
+    override func tearDown() {
+        super.tearDown()
+        clearTestState()
     }
 
     func testNil() {

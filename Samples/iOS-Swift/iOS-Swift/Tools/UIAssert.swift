@@ -34,17 +34,19 @@ class UIAssert {
         guard let window = UIApplication.shared.delegate?.window else { return }
         guard let target = window else { return }
         
-        if view.superview != target {
-            view.removeFromSuperview()
-            
-            target.addSubview(view)
-            
-            let constraints = [
-                view.leftAnchor.constraint(equalTo: target.leftAnchor, constant: 0),
-                view.rightAnchor.constraint(equalTo: target.rightAnchor, constant: 0),
-                view.bottomAnchor.constraint(equalTo: target.bottomAnchor, constant: 0)
-            ]
-            NSLayoutConstraint.activate(constraints)
+        DispatchQueue.main.async {
+            if self.view.superview != target {
+                self.view.removeFromSuperview()
+                
+                target.addSubview(self.view)
+                
+                let constraints = [
+                    self.view.leftAnchor.constraint(equalTo: target.leftAnchor, constant: 0),
+                    self.view.rightAnchor.constraint(equalTo: target.rightAnchor, constant: 0),
+                    self.view.bottomAnchor.constraint(equalTo: target.bottomAnchor, constant: 0)
+                ]
+                NSLayoutConstraint.activate(constraints)
+            }
         }
     }
     
@@ -82,11 +84,11 @@ class UIAssert {
             return
         }
         
-        let steps = stepsToCheck ?? ["loadView", "viewDidLoad", "viewWillAppear", "viewDidAppear", "viewAppearing"]
+        let steps = stepsToCheck ?? ["loadView", "viewDidLoad", "viewWillAppear", "viewDidAppear"]
         var missing = [String]()
         
         steps.forEach { spanDescription in
-            let index = children.firstIndex { $0.context.spanDescription == spanDescription }
+            let index = children.firstIndex { $0.spanDescription == spanDescription }
             
             if let spanIndex = index {
                 children.remove(at: spanIndex)

@@ -1,3 +1,4 @@
+import SentryTestUtils
 import XCTest
 
 class SentryCrashScopeObserverTests: XCTestCase {
@@ -17,16 +18,9 @@ class SentryCrashScopeObserverTests: XCTestCase {
     
     private let fixture = Fixture()
     
-    override func setUp() {
-        super.setUp()
-        sentrycrash_scopesync_reset()
-        SentryCrash.sharedInstance().userInfo = nil
-    }
-    
     override func tearDown() {
         super.tearDown()
-        sentrycrash_scopesync_reset()
-        SentryCrash.sharedInstance().userInfo = nil
+        clearTestState()
     }
 
     func testUser() {
@@ -204,7 +198,7 @@ class SentryCrashScopeObserverTests: XCTestCase {
     func testAddCrumb() {
         let sut = fixture.sut
         let crumb = TestData.crumb
-        sut.add(crumb)
+        sut.addSerializedBreadcrumb(crumb.serialize())
         
         assertOneCrumbSetToScope(crumb: crumb)
     }
@@ -216,14 +210,14 @@ class SentryCrashScopeObserverTests: XCTestCase {
     func testCallConfigureCrumbTwice() {
         let sut = fixture.sut
         let crumb = TestData.crumb
-        sut.add(crumb)
+        sut.addSerializedBreadcrumb(crumb.serialize())
         
         sentrycrash_scopesync_configureBreadcrumbs(fixture.maxBreadcrumbs)
         
         let scope = sentrycrash_scopesync_getScope()
         XCTAssertEqual(0, scope?.pointee.currentCrumb)
         
-        sut.add(crumb)
+        sut.addSerializedBreadcrumb(crumb.serialize())
         assertOneCrumbSetToScope(crumb: crumb)
     }
 
@@ -234,7 +228,7 @@ class SentryCrashScopeObserverTests: XCTestCase {
         for i in 0...fixture.maxBreadcrumbs {
             let crumb = TestData.crumb
             crumb.message = "\(i)"
-            sut.add(crumb)
+            sut.addSerializedBreadcrumb(crumb.serialize())
             crumbs.append(crumb)
         }
         crumbs.removeFirst()
@@ -273,11 +267,11 @@ class SentryCrashScopeObserverTests: XCTestCase {
         sut.setExtras(fixture.extras)
         sut.setFingerprint(fixture.fingerprint)
         sut.setLevel(SentryLevel.fatal)
-        sut.add(TestData.crumb)
-        
+        sut.addSerializedBreadcrumb(TestData.crumb.serialize())
+
         sut.clear()
-        
-       assertEmptyScope()
+
+        assertEmptyScope()
     }
     
     func testEmptyScope() {
@@ -297,7 +291,7 @@ class SentryCrashScopeObserverTests: XCTestCase {
         return jsonPointer!.pointee
     }
     
-    private func getScopeJson(getField: (SentryCrashScope)-> UnsafeMutablePointer<CChar>?) -> String? {
+    private func getScopeJson(getField: (SentryCrashScope) -> UnsafeMutablePointer<CChar>?) -> String? {
         guard let scopePointer = sentrycrash_scopesync_getScope() else {
             return nil
         }

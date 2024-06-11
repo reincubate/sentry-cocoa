@@ -1,73 +1,97 @@
+import Nimble
 @testable import Sentry
+import SentryTestUtils
 import XCTest
 
-@available(OSX 10.10, *)
 class SentryCrashInstallationReporterTests: XCTestCase {
-    
-    private static let dsnAsString = TestConstants.dsnAsString(username: "SentryCrashInstallationReporterTests")
-    
-    private var testClient: TestClient!
+        
     private var sut: SentryCrashInstallationReporter!
-    
-    override func setUp() {
-        super.setUp()
-        sut = SentryCrashInstallationReporter(inAppLogic: SentryInAppLogic(inAppIncludes: [], inAppExcludes: []))
-        sut.install()
-        // Works only if SentryCrash is installed
-        sentrycrash_deleteAllReports()
-    }
+    private var testClient: TestClient!
     
     override func tearDown() {
         super.tearDown()
         sentrycrash_deleteAllReports()
         clearTestState()
+        sut.uninstall()
+    }
+    
+    func testReportIsSentAndDeleted() throws {
+        givenSutWithStartedSDK()
+        
+        try givenStoredSentryCrashReport(resource: "Resources/crash-report-1")
+
+        sut.sendAllReports { filteredReports, _, _ in
+            expect(filteredReports?.count) == 1
+        }
+        
+        expect(self.testClient.captureCrashEventInvocations.count) == 1
+        expect(sentrycrash_getReportCount()) == 0
+    }
+    
+    /**
+     * Validates that handling a crash report with the removed fields total_storage and free_storage works.
+     */
+    func testShouldCaptureCrashReportWithLegacyStorageInfo() throws {
+        givenSutWithStartedSDK()
+        
+        try givenStoredSentryCrashReport(resource: "Resources/crash-report-legacy-storage-info")
+
+        sut.sendAllReports { filteredReports, _, _ in
+            expect(filteredReports?.count) == 1
+        }
+        
+        expect(self.testClient.captureCrashEventInvocations.count) == 1
+        expect(sentrycrash_getReportCount()) == 0
+        
+        let event = self.testClient.captureCrashEventInvocations.last?.event
+        expect(event?.context?["device"]?["free_storage"] as? Int) == 278_914_420_736
+        // total_storage got converted to storage_size
+        expect(event?.context?["device"]?["storage_size"] as? Int) == 994_662_584_320
+    }
+    
+    func testShouldCaptureCrashReportWithoutDeviceContext() throws {
+        givenSutWithStartedSDK()
+        
+        try givenStoredSentryCrashReport(resource: "Resources/crash-report-without-device-context")
+
+        sut.sendAllReports { filteredReports, _, _ in
+            expect(filteredReports?.count) == 1
+        }
+        
+        expect(self.testClient.captureCrashEventInvocations.count) == 1
+        expect(sentrycrash_getReportCount()) == 0
+        
+        let event = self.testClient.captureCrashEventInvocations.last?.event
+        expect(event?.context?["device"]) == nil
+        expect(event?.context?["app"]?["app_name"] as? String) == "iOS-Swift"
     }
     
     func testFaultyReportIsNotSentAndDeleted() throws {
-        sdkStarted()
-        sentryCrashHasFaultyCrashReport()
+        givenSutWithStartedSDK()
+        
+        try givenStoredSentryCrashReport(resource: "Resources/Crash-faulty-report")
 
-        sut.sendAllReports()
+        sut.sendAllReports { filteredReports, _, _ in
+            expect(filteredReports?.count) == 0
+        }
         
-        // We need to wait a bit until SentryCrash is finished processing reports.
-        // It is not optimal to block, but we would need to change the internals
-        // of SentryCrash a lot to be able to avoid this delay. As we would
-        // like to replace SentryCrash anyway it's not worth the effort right now.
-        delayNonBlocking()
-        
-        assertNoEventsSent()
-        assertNoReportsStored()
+        expect(self.testClient.captureCrashEventInvocations.count) == 0
+        expect(sentrycrash_getReportCount()) == 0
     }
     
-    private func sdkStarted() {
-        SentrySDK.start { options in
-            options.dsn = SentryCrashInstallationReporterTests.dsnAsString
-        }
+    private func givenSutWithStartedSDK() {
         let options = Options()
-        options.dsn = SentryCrashInstallationReporterTests.dsnAsString
-        testClient = TestClient(options: options)!
+        options.dsn = TestConstants.dsnAsString(username: "SentryCrashInstallationReporterTests")
+        options.setIntegrations([SentryCrashIntegration.self])
+        SentrySDK.start(options: options)
+        
+        testClient = TestClient(options: options)
         let hub = SentryHub(client: testClient, andScope: nil)
         SentrySDK.setCurrentHub(hub)
-    }
-
-    private func sentryCrashHasFaultyCrashReport() {
-        do {
-            let jsonPath = Bundle(for: type(of: self)).path(forResource: "Resources/Crash-faulty-report", ofType: "json")
-            let jsonData = try Data(contentsOf: URL(fileURLWithPath: jsonPath ?? ""))
-            jsonData.withUnsafeBytes { ( bytes: UnsafeRawBufferPointer) -> Void in
-                let pointer = bytes.bindMemory(to: Int8.self)
-                sentrycrashcrs_addUserReport(pointer.baseAddress, Int32(jsonData.count))
-            }
-        } catch {
-            XCTFail("Failed to store faulty crash report in SentryCrash.")
-        }
-    }
-    
-    private func assertNoEventsSent() {
-        XCTAssertEqual(0, testClient.captureEventWithScopeInvocations.count)
-    }
-    
-    private func assertNoReportsStored() {
-        XCTAssertEqual(0, sentrycrash_getReportCount())
+        
+        sut = SentryCrashInstallationReporter(inAppLogic: SentryInAppLogic(inAppIncludes: [], inAppExcludes: []), crashWrapper: TestSentryCrashWrapper.sharedInstance(), dispatchQueue: TestSentryDispatchQueueWrapper())
+        sut.install(options.cacheDirectoryPath)
+        // Works only if SentryCrash is installed
+        sentrycrash_deleteAllReports()
     }
 }

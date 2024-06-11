@@ -1,4 +1,5 @@
 #import "SentryDefines.h"
+#import "SentryInternalCDefines.h"
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -10,17 +11,27 @@ SENTRY_NO_INIT
 
 + (instancetype)sharedInstance;
 
+- (void)startBinaryImageCache;
+
+- (void)stopBinaryImageCache;
+
 - (BOOL)crashedLastLaunch;
+
+- (NSTimeInterval)durationFromCrashStateInitToLastCrash;
 
 - (NSTimeInterval)activeDurationSinceLastCrash;
 
 - (BOOL)isBeingTraced;
 
+- (BOOL)isSimulatorBuild;
+
 - (BOOL)isApplicationInForeground;
 
-- (void)installAsyncHooks;
+- (NSDictionary *)systemInfo;
 
-- (void)deactivateAsyncHooks;
+- (bytes)freeMemorySize;
+
+- (bytes)appMemorySize;
 
 @end
 

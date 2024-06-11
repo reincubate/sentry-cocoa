@@ -1,3 +1,4 @@
+import SentryTestUtils
 import XCTest
 
 class SentrySessionTestsSwift: XCTestCase {
@@ -7,11 +8,16 @@ class SentrySessionTestsSwift: XCTestCase {
     override func setUp() {
         super.setUp()
         currentDateProvider = TestCurrentDateProvider()
-        CurrentDate.setCurrentDateProvider(currentDateProvider)
+        SentryDependencyContainer.sharedInstance().dateProvider = currentDateProvider
+    }
+    
+    override func tearDown() {
+        super.tearDown()
+        clearTestState()
     }
     
     func testEndSession() {
-        let session = SentrySession(releaseName: "0.1.0")
+        let session = SentrySession(releaseName: "0.1.0", distinctId: "some-id")
         let date = currentDateProvider.date().addingTimeInterval(1)
         session.endExited(withTimestamp: date)
         
@@ -21,7 +27,7 @@ class SentrySessionTestsSwift: XCTestCase {
     }
     
     func testInitAndDurationNilWhenSerialize() {
-        let session1 = SentrySession(releaseName: "1.4.0")
+        let session1 = SentrySession(releaseName: "1.4.0", distinctId: "some-id")
         var json = session1.serialize()
         json.removeValue(forKey: "init")
         json.removeValue(forKey: "duration")
@@ -41,7 +47,7 @@ class SentrySessionTestsSwift: XCTestCase {
         let user = User()
         user.email = "someone@sentry.io"
 
-        let session = SentrySession(releaseName: "1.0.0")
+        let session = SentrySession(releaseName: "1.0.0", distinctId: "some-id")
         session.user = user
         let copiedSession = session.copy() as! SentrySession
 
@@ -54,7 +60,7 @@ class SentrySessionTestsSwift: XCTestCase {
     
     func testInitWithJson_Status_MapsToCorrectStatus() {
         func testStatus(status: SentrySessionStatus, statusAsString: String) {
-            let expected = SentrySession(releaseName: "release")
+            let expected = SentrySession(releaseName: "release", distinctId: "some-id")
             var serialized = expected.serialize()
             serialized["status"] = statusAsString
             let actual = SentrySession(jsonObject: serialized)!
@@ -92,9 +98,30 @@ class SentrySessionTestsSwift: XCTestCase {
     }
     
     func withValue(setValue: (inout [String: Any]) -> Void) {
-        let expected = SentrySession(releaseName: "release")
+        let expected = SentrySession(releaseName: "release", distinctId: "some-id")
         var serialized = expected.serialize()
         setValue(&serialized)
         XCTAssertNil(SentrySession(jsonObject: serialized))
+    }
+    
+    func testSerialize_Bools() {
+        let session = SentrySession(releaseName: "", distinctId: "some-id")
+
+        var json = session.serialize()
+        json["init"] = 2
+        
+        let session2 = SentrySession(jsonObject: json)
+        
+        let result = session2!.serialize() 
+        
+        XCTAssertTrue(result["init"] as? Bool ?? false)
+        XCTAssertNotEqual(2, result["init"] as? NSNumber ?? 2)
+        
+    }
+}
+
+extension SentrySessionStatus {
+    var description: String {
+        return nameForSentrySessionStatus(self)
     }
 }

@@ -1,13 +1,19 @@
 #import "NSDate+SentryExtras.h"
+#import "SentryBreadcrumb.h"
 #import "SentryBreadcrumbTracker.h"
+#import "SentryClient.h"
+#import "SentryDataCategory.h"
+#import "SentryEvent.h"
+#import "SentryHub.h"
+#import "SentryLevelMapper.h"
 #import "SentryMessage.h"
 #import "SentryMeta.h"
+#import "SentryOptions+HybridSDKs.h"
 #import "SentrySDK+Private.h"
-#import <Sentry/Sentry.h>
 #import <XCTest/XCTest.h>
 
 @interface
-SentryBreadcrumbTracker (Private)
+SentryBreadcrumbTracker ()
 
 + (NSString *)sanitizeViewControllerName:(NSString *)controller;
 
@@ -33,7 +39,9 @@ SentryBreadcrumbTracker (Private)
         // (code was loaded inside an app for example)
         // in this case, we don't care about asserting our hard coded value matches
         // since this will be the app version instead of our SDK version.
-        XCTAssert([version isEqualToString:SentryMeta.versionString]);
+        XCTAssert([version isEqualToString:SentryMeta.versionString],
+            @"Version of bundle:%@ not equal to version of SentryMeta:%@", version,
+            SentryMeta.versionString);
     }
 }
 
@@ -54,14 +62,18 @@ SentryBreadcrumbTracker (Private)
 
 - (void)testSDKDefaultHub
 {
-    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithConfigureOptions:^(SentryOptions *_Nonnull options) {
+        options.dsn = @"https://username:password@app.getsentry.com/12345";
+    }];
     XCTAssertNotNil([SentrySDK.currentHub getClient]);
     [SentrySDK.currentHub bindClient:nil];
 }
 
 - (void)testSDKBreadCrumbAdd
 {
-    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithConfigureOptions:^(SentryOptions *_Nonnull options) {
+        options.dsn = @"https://username:password@app.getsentry.com/12345";
+    }];
 
     SentryBreadcrumb *crumb = [[SentryBreadcrumb alloc] initWithLevel:kSentryLevelInfo
                                                              category:@"testCategory"];
@@ -74,7 +86,9 @@ SentryBreadcrumbTracker (Private)
 
 - (void)testSDKCaptureEvent
 {
-    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithConfigureOptions:^(SentryOptions *_Nonnull options) {
+        options.dsn = @"https://username:password@app.getsentry.com/12345";
+    }];
 
     SentryEvent *event = [[SentryEvent alloc] initWithLevel:kSentryLevelFatal];
 
@@ -86,7 +100,9 @@ SentryBreadcrumbTracker (Private)
 
 - (void)testSDKCaptureError
 {
-    [SentrySDK startWithOptions:@{ @"dsn" : @"https://username:password@app.getsentry.com/12345" }];
+    [SentrySDK startWithConfigureOptions:^(SentryOptions *_Nonnull options) {
+        options.dsn = @"https://username:password@app.getsentry.com/12345";
+    }];
 
     NSError *error =
         [NSError errorWithDomain:@"testworld"
@@ -97,12 +113,22 @@ SentryBreadcrumbTracker (Private)
 
 - (void)testLevelNames
 {
-    XCTAssertEqualObjects(@"none", SentryLevelNames[kSentryLevelNone]);
-    XCTAssertEqualObjects(@"debug", SentryLevelNames[kSentryLevelDebug]);
-    XCTAssertEqualObjects(@"info", SentryLevelNames[kSentryLevelInfo]);
-    XCTAssertEqualObjects(@"warning", SentryLevelNames[kSentryLevelWarning]);
-    XCTAssertEqualObjects(@"error", SentryLevelNames[kSentryLevelError]);
-    XCTAssertEqualObjects(@"fatal", SentryLevelNames[kSentryLevelFatal]);
+    XCTAssertEqual(kSentryLevelNone, sentryLevelForString(kSentryLevelNameNone));
+    XCTAssertEqual(kSentryLevelDebug, sentryLevelForString(kSentryLevelNameDebug));
+    XCTAssertEqual(kSentryLevelInfo, sentryLevelForString(kSentryLevelNameInfo));
+    XCTAssertEqual(kSentryLevelWarning, sentryLevelForString(kSentryLevelNameWarning));
+    XCTAssertEqual(kSentryLevelError, sentryLevelForString(kSentryLevelNameError));
+    XCTAssertEqual(kSentryLevelFatal, sentryLevelForString(kSentryLevelNameFatal));
+
+    XCTAssertEqual(kSentryLevelError, sentryLevelForString(@"fdjsafdsa"),
+        @"Failed to map an unexpected string value to the default case.");
+
+    XCTAssertEqualObjects(kSentryLevelNameNone, nameForSentryLevel(kSentryLevelNone));
+    XCTAssertEqualObjects(kSentryLevelNameDebug, nameForSentryLevel(kSentryLevelDebug));
+    XCTAssertEqualObjects(kSentryLevelNameInfo, nameForSentryLevel(kSentryLevelInfo));
+    XCTAssertEqualObjects(kSentryLevelNameWarning, nameForSentryLevel(kSentryLevelWarning));
+    XCTAssertEqualObjects(kSentryLevelNameError, nameForSentryLevel(kSentryLevelError));
+    XCTAssertEqualObjects(kSentryLevelNameFatal, nameForSentryLevel(kSentryLevelFatal));
 }
 
 - (void)testLevelOrder

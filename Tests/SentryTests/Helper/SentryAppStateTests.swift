@@ -14,6 +14,7 @@ class SentryAppStateTests: XCTestCase {
         XCTAssertEqual(appState.isActive, actual["is_active"] as? Bool)
         XCTAssertEqual(appState.wasTerminated, actual["was_terminated"] as? Bool)
         XCTAssertEqual(appState.isANROngoing, actual["is_anr_ongoing"] as? Bool)
+        XCTAssertEqual(appState.isSDKRunning, actual["is_sdk_running"] as? Bool)
     }
     
     func testInitWithJSON_AllFields() {
@@ -26,7 +27,8 @@ class SentryAppStateTests: XCTestCase {
             "system_boot_timestamp": (appState.systemBootTimestamp as NSDate).sentry_toIso8601String(),
             "is_active": appState.isActive,
             "was_terminated": appState.wasTerminated,
-            "is_anr_ongoing": appState.isANROngoing
+            "is_anr_ongoing": appState.isANROngoing,
+            "is_sdk_running": appState.isSDKRunning
         ] as [String: Any]
         
         let actual = SentryAppState(jsonObject: dict)
@@ -44,7 +46,7 @@ class SentryAppStateTests: XCTestCase {
         withValue { $0["was_terminated"] = nil }
         withValue { $0["is_anr_ongoing"] = nil }
     }
-    
+
     func testInitWithJSON_IfJsonContainsWrongField_AppStateIsNil() {
         withValue { $0["release_name"] = 0 }
         withValue { $0["os_version"] = nil }
@@ -72,5 +74,4 @@ class SentryAppStateTests: XCTestCase {
         setValue(&serialized)
         XCTAssertNil(SentryAppState(jsonObject: serialized))
     }
-
 }

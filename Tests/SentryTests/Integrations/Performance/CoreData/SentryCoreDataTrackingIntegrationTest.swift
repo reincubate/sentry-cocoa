@@ -1,4 +1,5 @@
 import CoreData
+import SentryTestUtils
 import XCTest
 
 class SentryCoreDataTrackingIntegrationTests: XCTestCase {
@@ -10,18 +11,13 @@ class SentryCoreDataTrackingIntegrationTests: XCTestCase {
         
         init() {
             options = Options()
-            options.enableCoreDataTracking = true
+            options.enableCoreDataTracing = true
             options.tracesSampleRate = 1
+            options.setIntegrations([SentryCoreDataTrackingIntegration.self])
         }
         
         func getSut() -> SentryCoreDataTrackingIntegration {
             return SentryCoreDataTrackingIntegration()
-        }
-        
-        func testEntity() -> TestEntity {
-            let entityDescription = NSEntityDescription()
-            entityDescription.name = "TestEntity"
-            return TestEntity(entity: entityDescription, insertInto: nil)
         }
     }
     
@@ -41,23 +37,23 @@ class SentryCoreDataTrackingIntegrationTests: XCTestCase {
     func test_InstallAndUninstall() {
         let sut = fixture.getSut()
         
-        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.middleware)
+        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.coreDataTracker)
         sut.install(with: fixture.options)
-        XCTAssertNotNil(SentryCoreDataSwizzling.sharedInstance.middleware)
+        XCTAssertNotNil(SentryCoreDataSwizzling.sharedInstance.coreDataTracker)
         sut.uninstall()
-        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.middleware)
+        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.coreDataTracker)
     }
     
     func test_Install_swizzlingDisabled() {
-        test_DontInstall { $0.enableSwizzling = false }
+        assert_DontInstall { $0.enableSwizzling = false }
     }
     
     func test_Install_autoPerformanceDisabled() {
-        test_DontInstall { $0.enableAutoPerformanceTracking = false }
+        assert_DontInstall { $0.enableAutoPerformanceTracing = false }
     }
     
     func test_Install_coreDataTrackingDisabled() {
-        test_DontInstall { $0.enableCoreDataTracking = false }
+        assert_DontInstall { $0.enableCoreDataTracing = false }
     }
     
     func test_Fetch() {
@@ -78,7 +74,7 @@ class SentryCoreDataTrackingIntegrationTests: XCTestCase {
         try? stack.managedObjectContext.save()
         
         XCTAssertEqual(transaction.children.count, 1)
-        XCTAssertEqual(transaction.children[0].context.operation, "db.transaction")
+        XCTAssertEqual(transaction.children[0].operation, "db.sql.transaction")
     }
     
     func test_Save_noChanges() {
@@ -112,12 +108,12 @@ class SentryCoreDataTrackingIntegrationTests: XCTestCase {
         XCTAssertEqual(transaction.children.count, 0)
     }
     
-    private func test_DontInstall(_ confOptions: ((Options) -> Void)) {
+    private func assert_DontInstall(_ confOptions: ((Options) -> Void)) {
         let sut = fixture.getSut()
         confOptions(fixture.options)
-        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.middleware)
+        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.coreDataTracker)
         sut.install(with: fixture.options)
-        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.middleware)
+        XCTAssertNil(SentryCoreDataSwizzling.sharedInstance.coreDataTracker)
     }
     
     private func startTransaction() -> SentryTracer {

@@ -13,6 +13,11 @@ class SplitViewController: UISplitViewController {
         super.init(coder: coder)
         initialize()
     }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        SentrySDK.reportFullyDisplayed()
+    }
     
     private func initialize() {
         self.modalPresentationStyle = .fullScreen
@@ -20,9 +25,10 @@ class SplitViewController: UISplitViewController {
 }
 
 class SplitRootViewController: UIViewController {
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        SentrySDK.reportFullyDisplayed()
     }
     
     @IBAction func close() {
@@ -30,11 +36,11 @@ class SplitRootViewController: UIViewController {
     }
     
     @IBAction func showSecondary() {
-            splitViewController?.showDetailViewController(SplitViewSecondaryController(), sender: nil)
+        splitViewController?.showDetailViewController(SecondarySplitViewController(), sender: nil)
     }
 }
 
-class SplitViewSecondaryController: UIViewController {
+class SecondarySplitViewController: UIViewController {
     
     var spanObserver: SpanObserver?
     var assertView: AssertView!
@@ -43,9 +49,8 @@ class SplitViewSecondaryController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = UIColor.white
         
-        assertView = AssertView()
+        assertView = AssertView().forAutoLayout()
         assertView.autoHide = false
-        assertView.translatesAutoresizingMaskIntoConstraints = false
         
         view.addSubview(assertView)
         
@@ -58,9 +63,19 @@ class SplitViewSecondaryController: UIViewController {
 
         spanObserver = createTransactionObserver(forCallback: assertTransaction)
     }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        SentrySDK.reportFullyDisplayed()
+        
+        if let topvc = TopViewControllerInspector.shared {
+            topvc.bringToFront()
+        }
+    }
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        SentrySDK.reportFullyDisplayed()
     }
      
     func assertTransaction(span: Span) {

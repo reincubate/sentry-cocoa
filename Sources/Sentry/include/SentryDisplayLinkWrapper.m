@@ -1,6 +1,7 @@
 #import "SentryDisplayLinkWrapper.h"
 
 #if SENTRY_HAS_UIKIT
+
 #    import <UIKit/UIKit.h>
 
 @implementation SentryDisplayLinkWrapper {
@@ -10,6 +11,11 @@
 - (CFTimeInterval)timestamp
 {
     return displayLink.timestamp;
+}
+
+- (CFTimeInterval)targetTimestamp API_AVAILABLE(ios(10.0), tvos(10.0))
+{
+    return displayLink.targetTimestamp;
 }
 
 - (void)linkWithTarget:(id)target selector:(SEL)sel
@@ -25,4 +31,4 @@
 
 @end
 
-#endif
+#endif // SENTRY_HAS_UIKIT
